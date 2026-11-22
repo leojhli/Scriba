@@ -1,5 +1,6 @@
 // Reads YouTube's on-screen captions into a rolling buffer of { text, start, end } (Task 3).
 import { CAPTION_KEEP_S } from "./shared/config";
+import { isAdShowing } from "./signals";
 
 export type CaptionLine = { text: string; start: number; end: number };
 
@@ -30,6 +31,11 @@ export class CaptionBuffer {
   }
 
   private read(): void {
+    // Ads have their own captions and their own clock: never mix them into the lines.
+    if (isAdShowing()) {
+      this.current = null;
+      return;
+    }
     const video = document.querySelector<HTMLVideoElement>("#movie_player video");
     if (!video) return;
     const t = video.currentTime;

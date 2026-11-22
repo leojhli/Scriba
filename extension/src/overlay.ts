@@ -180,6 +180,7 @@ export class Overlay {
   private shadowBtns: HTMLButtonElement[] = [];
   private hearBtns: HTMLButtonElement[] = [];
   private recTimer: ReturnType<typeof setInterval> | undefined;
+  private hidden = false;
 
   constructor(private handlers: OverlayHandlers) {}
 
@@ -192,6 +193,7 @@ export class Overlay {
     this.host.id = HOST_ID;
     // z-index 59 keeps us under YouTube's own control bar and settings menus (60+).
     this.host.style.cssText = "position:absolute;inset:0;z-index:59;pointer-events:none;";
+    this.host.style.display = this.hidden ? "none" : "";
     const root = this.host.attachShadow({ mode: "open" });
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(CSS);
@@ -206,6 +208,12 @@ export class Overlay {
     player.appendChild(this.host);
     this.panel = null;
     return true;
+  }
+
+  /** Hides everything (panel and chips), e.g. while an ad plays. */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
+    if (this.host) this.host.style.display = hidden ? "none" : "";
   }
 
   chip(text: string, ms = 2200): void {

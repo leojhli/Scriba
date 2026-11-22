@@ -75,6 +75,8 @@
 | Symptom | Fix |
 |---|---|
 | No bubble on pause | Reload the extension at `chrome://extensions`, then refresh the YouTube tab. Check the console for `[Pause&Effect] listening`. |
+| An ad is playing | That's expected: the overlay hides during ads (pre-rolls and mid-rolls), ignores pauses, and stops the voice. It comes back when the ad ends. |
+| Credits | Every video opened in the demo window gets processed, which costs about 3k ElevenLabs characters for the voice isolation. Browse in your normal Chrome and open only demo videos in the demo window. |
 | "Can't reach the server" chip | `wasp start` isn't running. Start it, and the chip clears on its own. |
 | "offline mode" chip all the time | `wasp start` isn't running, or the keys are missing in `.env.server`. Check the server terminal. |
 | Console says `ingest failed` | Usually a missing ElevenLabs key or an outdated yt-dlp. Fix it and refresh the tab: a reload retries the ingest. |

@@ -6,7 +6,7 @@ import { Recorder } from "./recorder";
 import { HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config";
 import type { Explanation, Segment, ShadowResult } from "./shared/types";
 import { window as segWindow } from "./shared/window";
-import { isAdShowing, watchPlayback } from "./signals";
+import { isAdShowing, watchAds, watchPlayback } from "./signals";
 
 type Session = { status: "processing" | "ready" | "failed"; segments: Segment[] | null; hasDialogue: boolean };
 
@@ -110,7 +110,8 @@ async function explain(video: HTMLVideoElement): Promise<void> {
     t,
     captionLines,
   });
-  if (seq !== explainSeq || !video.paused) return;
+  // An ad may have started while we waited: never draw over an ad.
+  if (seq !== explainSeq || !video.paused || isAdShowing()) return;
 
   let e: Explanation;
   if (res.ok) {
@@ -134,7 +135,7 @@ async function explain(video: HTMLVideoElement): Promise<void> {
 
   if (e.audioUrl) {
     const url = await mediaUrl(e.audioUrl);
-    if (!url || seq !== explainSeq) return;
+    if (!url || seq !== explainSeq || isAdShowing()) return;
     stopAudio();
     speech = new Audio(url);
     speech.onplay = () => overlay.speaking(true);
@@ -167,6 +168,7 @@ function onClose(): void {
 // ---------- "Hear it clearly" (Task 5) ----------
 
 async function onHear(line: Line, i: number): Promise<void> {
+  if (isAdShowing()) return;
   const seg = segment(line.segmentId);
   if (!videoId || !seg) return;
   stopAudio();
@@ -249,6 +251,19 @@ if (root.dataset.pauseEffect) throw new Error("[Pause&Effect] already running on
 root.dataset.pauseEffect = String(Date.now());
 
 watchPlayback({ onPause, onPlay });
+// Ads: drop whatever is on screen, stop the voice, and hide the overlay until the ad ends.
+watchAds((ad) => {
+  if (ad) {
+    clearTimeout(pauseTimer);
+    explainSeq++;
+    stopAudio();
+    overlay.hideBubble();
+    log("ad playing: paused until it ends");
+  } else {
+    log("ad finished");
+  }
+  overlay.setHidden(ad);
+});
 captions.start();
 document.addEventListener("yt-navigate-finish", onNavigate);
 window.addEventListener("popstate", onNavigate);
