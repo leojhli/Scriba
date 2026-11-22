@@ -14,6 +14,15 @@ app PauseAndEffect {
     onAuthFailedRedirectTo: "/login",
     onAuthSucceededRedirectTo: "/deck",
   },
+  server: {
+    setupFn: import { setup } from "@src/server/setup",
+    middlewareConfigFn: import { serverMiddleware } from "@src/server/setup",
+  },
+  db: {
+    seeds: [
+      import { seedDemoCache } from "@src/server/seed",
+    ],
+  },
 }
 
 // ---------- Pages ----------
@@ -51,4 +60,40 @@ api extPing {
   fn: import { extPing } from "@src/server/ping",
   httpRoute: (POST, "/ext/ping"),
   auth: false
+}
+
+// Task 1: { videoId, title } → { status, segments, hasDialogue }; starts ingest on first call
+api extSession {
+  fn: import { extSession } from "@src/server/ingest",
+  httpRoute: (POST, "/ext/session"),
+  entities: [Video],
+  auth: false
+}
+
+// Task 4: { videoId, t, captionLines } → Explanation
+api extExplain {
+  fn: import { extExplain } from "@src/server/explain",
+  httpRoute: (POST, "/ext/explain"),
+  entities: [Moment, Video, User],
+  auth: false
+}
+
+// Task 6: { videoId, segmentId, audioBase64, durationSec } → ShadowResult
+api extShadow {
+  fn: import { extShadow } from "@src/server/shadow",
+  httpRoute: (POST, "/ext/shadow"),
+  entities: [ShadowAttempt, Video, User],
+  auth: false
+}
+
+// ---------- Study program operations (Task 7) ----------
+
+query getDeck {
+  fn: import { getDeck } from "@src/server/deck",
+  entities: [Moment, ShadowAttempt, Video, User]
+}
+
+action submitShadow {
+  fn: import { submitShadow } from "@src/server/deck",
+  entities: [ShadowAttempt, Video, User]
 }

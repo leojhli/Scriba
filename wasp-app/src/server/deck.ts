@@ -1,0 +1,69 @@
+import type { GetDeck, SubmitShadow } from "wasp/server/operations";
+import type { ShadowResult } from "../shared/types";
+import { getDemoUserId } from "./demoUser";
+import { scoreAttempt, type ShadowInput } from "./shadow";
+import { getVideo, readTranslations } from "./videos";
+
+export type DeckCard = {
+  videoId: string;
+  videoTitle: string;
+  segmentId: number;
+  text: string;
+  start: number;
+  end: number;
+  translation: string;
+  notes: string[];
+  pauses: number;
+  bestAccuracy: number | null;
+  hasDialogue: boolean;
+};
+
+/** The demo user's pauses grouped by line, ranked by how often they paused there. */
+export const getDeck: GetDeck<void, DeckCard[]> = async (_args, context) => {
+  const userId = await getDemoUserId();
+  const moments = await context.entities.Moment.findMany({ where: { userId, segmentId: { gte: 0 } } });
+  const attempts = await context.entities.ShadowAttempt.findMany({ where: { userId } });
+
+  const groups = new Map<string, { videoId: string; segmentId: number; pauses: number; last: number }>();
+  for (const m of moments) {
+    const key = `${m.videoId}:${m.segmentId}`;
+    const g = groups.get(key) ?? { videoId: m.videoId, segmentId: m.segmentId, pauses: 0, last: 0 };
+    g.pauses += 1;
+    g.last = Math.max(g.last, m.createdAt.getTime());
+    groups.set(key, g);
+  }
+
+  const cards: DeckCard[] = [];
+  for (const g of groups.values()) {
+    const video = await getVideo(g.videoId);
+    const seg = video?.segments?.find((s) => s.id === g.segmentId);
+    if (!video || !seg) continue;
+    const tr = readTranslations(g.videoId)[g.segmentId];
+    const best = attempts
+      .filter((a) => a.videoId === g.videoId && a.segmentId === g.segmentId)
+      .reduce<number | null>((b, a) => (b === null || a.accuracy > b ? a.accuracy : b), null);
+    cards.push({
+      videoId: g.videoId,
+      videoTitle: video.title,
+      segmentId: g.segmentId,
+      text: seg.text,
+      start: seg.start,
+      end: seg.end,
+      translation: tr?.translation ?? "",
+      notes: tr?.notes ?? [],
+      pauses: g.pauses,
+      bestAccuracy: best,
+      hasDialogue: video.hasDialogue,
+    });
+  }
+  const last = new Map([...groups.values()].map((g) => [`${g.videoId}:${g.segmentId}`, g.last]));
+  // Most-paused first; ties go to the most recent.
+  return cards.sort(
+    (a, b) => b.pauses - a.pauses || (last.get(`${b.videoId}:${b.segmentId}`) ?? 0) - (last.get(`${a.videoId}:${a.segmentId}`) ?? 0),
+  );
+};
+
+/** Shadowing from /practice: same scoring path as /ext/shadow. */
+export const submitShadow: SubmitShadow<ShadowInput, ShadowResult & { heard: string }> = async (args) => {
+  return scoreAttempt(args, await getDemoUserId());
+};
