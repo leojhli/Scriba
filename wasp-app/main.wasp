@@ -2,9 +2,9 @@ app PauseAndEffect {
   wasp: {
     version: "^0.22.0"
   },
-  title: "Pause & Effect",
+  title: "Scriba",
   head: [
-    "<link rel='icon' href='/favicon.ico' />",
+    "<link rel='icon' href='/scriba-inu.png' />",
   ],
   auth: {
     userEntity: User,

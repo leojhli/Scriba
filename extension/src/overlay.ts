@@ -69,6 +69,29 @@ function squiggle(): SVGSVGElement {
   return svg;
 }
 
+/** Two "pencil" filters: noise-displaced strokes so outlines wobble like they were drawn by hand. */
+function sketchDefs(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("width", "0");
+  svg.setAttribute("height", "0");
+  svg.setAttribute("style", "position:absolute");
+  svg.setAttribute("aria-hidden", "true");
+  for (const [id, freq, seed, scale, xc, yc] of [
+    ["sk1", ".035", "3", "3.5", "R", "G"],
+    ["sk2", ".025", "11", "5", "G", "R"],
+  ]) {
+    const f = document.createElementNS(SVG_NS, "filter");
+    for (const [k, v] of [["id", id], ["x", "-5%"], ["y", "-5%"], ["width", "110%"], ["height", "110%"]]) f.setAttribute(k, v);
+    const t = document.createElementNS(SVG_NS, "feTurbulence");
+    for (const [k, v] of [["type", "fractalNoise"], ["baseFrequency", freq], ["numOctaves", "2"], ["seed", seed], ["result", "noise"]]) t.setAttribute(k, v);
+    const d = document.createElementNS(SVG_NS, "feDisplacementMap");
+    for (const [k, v] of [["in", "SourceGraphic"], ["in2", "noise"], ["scale", scale], ["xChannelSelector", xc], ["yChannelSelector", yc]]) d.setAttribute(k, v);
+    f.append(t, d);
+    svg.append(f);
+  }
+  return svg;
+}
+
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const MASCOT = () => chrome.runtime.getURL("assets/scriba-inu.png");
 const NON_LATIN = /(?!\p{Script=Latin})\p{L}/u;
@@ -105,6 +128,7 @@ const CSS = `
   display: flex; flex-direction: column; pointer-events: auto;
   transform: translateX(28px) rotate(.6deg); opacity: 0; transition: transform .38s cubic-bezier(.2,.9,.25,1.1), opacity .25s ease; }
 .stage.on .scroll { transform: rotate(.4deg); opacity: 1; }
+.roll, .ribbon { filter: url(#sk1); }
 .roll { position: relative; flex: none; height: 22px; margin: 0 -8px; z-index: 2; border: 1.75px solid var(--ink);
   border-radius: 12px 14px 11px 13px / 11px 12px 13px 12px; background: linear-gradient(180deg, #fffdf9 0%, #f3ede3 50%, #d9d0c3 100%); }
 .roll::before, .roll::after { content: ""; position: absolute; top: 50%; width: 15px; height: 15px; margin-top: -7.5px; border-radius: 50%;
@@ -115,10 +139,10 @@ const CSS = `
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); z-index: 1; }
 .paper { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; overflow: hidden;
   background: linear-gradient(90deg, rgba(240,226,204,.55), rgba(255,251,243,.0) 9%, rgba(255,251,243,0) 91%, rgba(240,226,204,.55)), rgba(255,250,240,.8);
-  backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1);
-  border-left: 1.75px solid var(--ink); border-right: 1.75px solid var(--ink); }
-.paper::before { content: ""; position: absolute; inset: 0 3px 0 -2px; border-left: 1px solid var(--pencil); border-right: 1px solid var(--pencil);
-  transform: rotate(-.35deg); pointer-events: none; }
+  backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); }
+.paper::before, .paper::after { content: ""; position: absolute; z-index: 2; pointer-events: none; }
+.paper::before { inset: 0 2px; border-left: 2px solid var(--ink); border-right: 2px solid var(--ink); filter: url(#sk1); }
+.paper::after { inset: 0 6px 0 4px; border-left: 1.1px solid rgba(43,36,32,.4); border-right: 1.1px solid rgba(43,36,32,.4); filter: url(#sk2); }
 canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5; pointer-events: none; }
 .head, .body, .foot { position: relative; z-index: 1; }
 
@@ -152,8 +176,8 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
   background: linear-gradient(transparent 55%, rgba(255,163,60,.35) 55%); padding: 0 .15em; }
 .orig { font-family: var(--round); font-size: 1.38em; line-height: 1.3; }
 .rom { color: var(--ribbon); font-weight: 600; }
-.en { color: var(--muted); }
-.notes { list-style: none; display: flex; flex-direction: column; gap: .2em; margin-top: .2em; font-size: .86em; color: #4a3f37; }
+.en { color: var(--muted); font-family: var(--hand); }
+.notes { list-style: none; display: flex; flex-direction: column; gap: .2em; margin-top: .2em; font-size: .86em; color: #4a3f37; font-family: var(--hand); }
 .notes li { position: relative; padding-left: 1em; }
 .notes li::before { content: "~"; position: absolute; left: 0; top: -.05em; color: var(--shiba-deep); font-family: var(--hand); font-weight: 700; }
 .actions { display: flex; gap: .5em; flex-wrap: wrap; margin: .45em 0 .15em; }
@@ -169,14 +193,15 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
 /* Sketched buttons: uneven pencil outline with a faint second stroke */
 .btn { all: unset; position: relative; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .4em; white-space: nowrap;
   font-family: var(--hand); font-weight: 700; font-size: .8em; padding: .38em .8em; color: var(--ink); background: rgba(255,252,246,.55);
-  border: 1.6px solid var(--ink); border-radius: 16px 20px 15px 22px / 20px 15px 22px 16px; transition: background .15s, transform .1s; }
-.btn::after { content: ""; position: absolute; inset: -3px -2px -2px -3px; border: 1px solid var(--pencil);
-  border-radius: 20px 14px 22px 15px / 15px 22px 14px 20px; pointer-events: none; }
+  border: 0; border-radius: 16px 20px 15px 22px / 20px 15px 22px 16px; transition: background .15s, transform .1s; }
+.btn::before { content: ""; position: absolute; inset: 0; border: 1.7px solid var(--ink); border-radius: inherit; filter: url(#sk1); pointer-events: none; }
+.btn::after { content: ""; position: absolute; inset: -3px -2px -2px -3px; border: 1.1px solid rgba(43,36,32,.42);
+  border-radius: 20px 14px 22px 15px / 15px 22px 14px 20px; filter: url(#sk2); pointer-events: none; }
 .btn:hover { background: rgba(255,255,255,.9); transform: rotate(-1deg); }
 .btn:active { transform: translateY(1px); }
 .btn:focus-visible { outline: 2px dashed var(--shiba-deep); outline-offset: 3px; }
-.btn.primary { background: rgba(255,163,60,.6); }
-.btn.primary:hover { background: rgba(255,163,60,.8); }
+.btn.primary { background: repeating-linear-gradient(-55deg, rgba(255,163,60,.78) 0 2.5px, rgba(255,163,60,.42) 2.5px 6px); }
+.btn.primary:hover { background: repeating-linear-gradient(-55deg, rgba(255,163,60,.95) 0 2.5px, rgba(255,163,60,.6) 2.5px 6px); }
 .btn.icon { padding: .38em; }
 .btn.playing { background: var(--ink); color: #fff; }
 .btn.rec { background: rgba(214,83,58,.85); color: #fff; animation: pulse 1.1s infinite; }
@@ -207,8 +232,9 @@ a.btn { text-decoration: none; }
 .chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; transition: opacity .2s; }
 .wrap.open .chips { opacity: 0; }
 .chip { display: inline-flex; align-items: center; gap: .45em; padding: .32em .8em .32em .4em; font-family: var(--hand); font-weight: 700; font-size: 13px;
-  color: var(--ink); background: rgba(255,248,236,.92); border: 1.5px solid var(--ink); border-radius: 14px 18px 13px 19px / 18px 13px 19px 14px;
+  position: relative; color: var(--ink); background: rgba(255,248,236,.92); border: 0; border-radius: 14px 18px 13px 19px / 18px 13px 19px 14px;
   animation: rise .25s ease-out both; }
+.chip::before { content: ""; position: absolute; inset: 0; border: 1.6px solid var(--ink); border-radius: inherit; filter: url(#sk1); pointer-events: none; }
 .chip img { width: 20px; height: auto; }
 .chip.ok { background: rgba(230,247,225,.95); } .chip.warn { background: rgba(255,231,199,.95); } .chip.offline { background: rgba(255,220,210,.95); }
 .spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid #f3d9b4; border-top-color: var(--shiba-deep); animation: spin .8s linear infinite; }
@@ -308,7 +334,7 @@ export class Overlay {
     this.stage = h("div", "stage", h("div", "shade"), scroll);
     this.chips = h("div", "chips");
     this.wrap = h("div", "wrap", this.stage, this.chips);
-    root.append(this.wrap);
+    root.append(sketchDefs(), this.wrap);
     if (this.statusChip) this.chips.append(this.statusChip);
     if (this.offlineChip) this.chips.append(this.offlineChip);
     player.appendChild(this.host);

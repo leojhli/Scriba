@@ -1,10 +1,11 @@
-import { useRef, useState } from "react";
+import { type CSSProperties, useRef, useState } from "react";
 import { config } from "wasp/client";
 import { getDeck, submitShadow, useQuery } from "wasp/client/operations";
 import { Link } from "wasp/client/router";
 import type { ShadowResult } from "../shared/types";
 import "./Main.css";
 import "./study.css";
+import { SketchDefs } from "./SketchDefs";
 
 const RATE = 0.75;
 
@@ -33,9 +34,14 @@ export function PracticePage() {
   if (!card)
     return (
       <main className="study">
-        <h1>Practice</h1>
-        <p className="sub">Nothing to practise yet — pause on some lines first.</p>
-        <Link to="/deck" className="btn">← Deck</Link>
+        <div className="empty">
+          <img src="/scriba-inu.png" alt="Scriba" />
+          <p className="say">Nothing to practise yet.</p>
+          <p className="sub">Pause on a few lines with Scriba on, then come back.</p>
+          <p style={{ marginTop: 16 }}>
+            <Link to="/deck" className="btn">← Deck</Link>
+          </p>
+        </div>
       </main>
     );
 
@@ -101,55 +107,80 @@ export function PracticePage() {
     setI((i + 1) % top.length);
   };
 
+  const pct = result ? Math.round(result.accuracy * 100) : 0;
+  const ring = { "--p": pct, "--c": pct >= 80 ? "#3fb55e" : pct >= 50 ? "#ffb21c" : "#d6533a" } as CSSProperties;
+
   return (
     <main className="study">
+      <SketchDefs />
       <header className="study-head">
-        <div>
-          <h1>Practice</h1>
-          <p className="sub">
-            Card {i + 1} of {top.length} · paused {card.pauses}× · {card.videoTitle}
-          </p>
+        <div className="brand">
+          <img src="/scriba-inu.png" alt="Scriba" />
+          <div>
+            <div className="kicker">Scriba · practice</div>
+            <h1>Say it after me</h1>
+            <p className="sub">
+              Card {i + 1} of {top.length} · paused {card.pauses}× · {card.videoTitle}
+            </p>
+          </div>
         </div>
         <Link to="/deck" className="btn">← Deck</Link>
       </header>
 
-      <section className="practice">
-        <div className="line-es big">{card.text}</div>
-        {card.romanization && <div className="line-rom big">{card.romanization}</div>}
-        {card.translation ? <div className="line-en">{card.translation}</div> : <div className="line-en muted">(no translation yet)</div>}
+      <section className="scroll">
+        <div className="roll" />
+        <div className="ribbon" />
+        <div className="practice">
+          <div className="kicker">Just said</div>
+          <div className="line-es big">{card.text}</div>
+          {card.romanization && <div className="line-rom big">{card.romanization}</div>}
+          {card.translation ? <div className="line-en big">{card.translation}</div> : <div className="line-en muted">(no translation yet)</div>}
 
-        <div className="row">
-          <button className="btn" onClick={play}>
-            🔊 {card.hasDialogue ? "Hear it clearly" : "Hear it"} ({RATE}×)
-          </button>
-          <button
-            className={recording ? "btn rec" : "btn primary"}
-            onPointerDown={start}
-            onPointerUp={stop}
-            onPointerLeave={() => recording && stop()}
-            disabled={scoring}
-          >
-            {recording ? "● Recording… release to score" : scoring ? "Scoring…" : "🎙 Hold to shadow"}
-          </button>
-          <button className="btn" onClick={next}>
-            Next →
-          </button>
-        </div>
-
-        {err && <p className="sub">{err}</p>}
-        {result && (
-          <div className="result">
-            <span className="score">{Math.round(result.accuracy * 100)}%</span>
-            {result.diff.map((d, k) => (
-              <span key={k} className={`w ${d.status}`} title={d.status}>
-                {d.word}
-              </span>
-            ))}
-            <div className="sub">
-              pace {result.paceRatio.toFixed(2)}× · heard: “{result.heard || "…nothing"}”
-            </div>
+          <div className="row">
+            <button className="btn" onClick={play}>
+              {card.hasDialogue ? "Hear it clearly" : "Hear it"} · {RATE}×
+            </button>
+            <button
+              className={recording ? "btn rec" : "btn primary"}
+              onPointerDown={start}
+              onPointerUp={stop}
+              onPointerLeave={() => recording && stop()}
+              disabled={scoring}
+            >
+              {recording ? "● Recording… release to score" : scoring ? "Scoring…" : "Hold to shadow"}
+            </button>
+            <button className="btn" onClick={next}>
+              Next →
+            </button>
           </div>
-        )}
+
+          {err && <p className="sub">{err}</p>}
+          {result && (
+            <div className="result">
+              <div className="ring" style={ring}>
+                <span>{pct}%</span>
+              </div>
+              <div>
+                <div className="words">
+                  {result.diff.map((d, k) => (
+                    <span key={k} className={`w ${d.status}`} title={d.status}>
+                      {d.word}
+                    </span>
+                  ))}
+                </div>
+                <div className="pace">
+                  pace {result.paceRatio.toFixed(2)}× · heard “{result.heard || "…nothing"}”
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="dots">
+            {top.map((_, k) => (
+              <span key={k} className={k === i ? "on" : k < i ? "done" : ""} />
+            ))}
+          </div>
+        </div>
+        <div className="roll bottom" />
       </section>
     </main>
   );
