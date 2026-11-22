@@ -33,6 +33,24 @@ Not verified: shadowing with a real microphone (needs a human), and the /practic
 
 **Demo Chrome window:** Chrome 157 ignores `--load-extension`, so the demo profile (`.chrome-demo-profile/`, gitignored) is launched with `--enable-unsafe-extension-debugging --remote-debugging-port=9333`, and the extension is loaded via the CDP call `Extensions.loadUnpacked`. Or just use "Load unpacked" in normal Chrome.
 
+## Explain latency (measured 2026-11-22)
+
+The server logs `[explain] <id>@<t>s claude=…ms tts=…ms total=…ms` for every pause.
+
+| Step | Time | Share |
+|---|---|---|
+| Claude (Sonnet 5.5, structured JSON) | 3.6–5.8 s | ~87% |
+| ElevenLabs TTS (flash v2.5) | 0.55–0.65 s | ~12% |
+| Extension (250 ms pause debounce + messaging) | ~0.5 s | rest |
+
+Benchmark, median of 3: Sonnet 5.5 takes 4.3 s in total, but the `summary` (written first) is complete after 1.6 s when streamed. Haiku 5.5 takes 2.9 s in total, with the summary ready at 1.3 s.
+
+Speed-up options, not implemented yet:
+1. Stream Claude and start TTS as soon as the summary is done. This saves ~0.6 s with no change in quality.
+2. Two-phase response: voice + summary first (~2.5 s after the pause), with translations and notes filling in afterwards.
+3. Use Haiku 5.5, saving ~1.4 s at some cost in quality.
+4. Pre-generate explanations for every line right after ingest. Pauses then feel instant, at the cost of Claude + TTS credits for every line.
+
 ## Any language (decided 2026-11-22)
 
 The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.

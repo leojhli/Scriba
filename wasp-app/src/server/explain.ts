@@ -140,6 +140,8 @@ export const extExplain: ExtExplain = async (req, res) => {
   await recordPause(videoId, t).catch((e) => console.error("[explain] moment", e));
 
   const key = String(Math.round(t));
+  const t0 = Date.now();
+  let tClaude = 0;
   let explanation: Explanation;
   try {
     const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId));
@@ -152,6 +154,7 @@ export const extExplain: ExtExplain = async (req, res) => {
         return { segmentId: l.segmentId, original: l.text, translation: o?.translation ?? "", notes: o?.notes ?? [] };
       }),
     };
+    tClaude = Date.now() - t0;
   } catch (e) {
     console.error("[explain] Claude failed, using cache", e);
     const cached = cachedFor(videoId, lines);
@@ -172,6 +175,7 @@ export const extExplain: ExtExplain = async (req, res) => {
     return;
   }
 
+  const t1 = Date.now();
   try {
     const file = `explain-${key}.mp3`;
     await speak(spokenText(explanation.summary), path.join(videoDir(videoId), file));
@@ -179,6 +183,7 @@ export const extExplain: ExtExplain = async (req, res) => {
   } catch (e) {
     console.error("[explain] TTS failed", e);
   }
+  console.log(`[explain] ${videoId}@${key}s claude=${tClaude}ms tts=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
 
   // Persist: translations for /deck + /practice, and the explanation for offline fallback.
   const tr = readTranslations(videoId);
