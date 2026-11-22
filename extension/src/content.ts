@@ -221,6 +221,12 @@ async function onShadowStop(line: Line, i: number): Promise<void> {
 
 // ---------- Boot ----------
 
+// One instance per page, even if the extension is reloaded or injected twice
+// (the DOM is shared between isolated worlds, so the flag is too).
+const root = document.documentElement;
+if (root.dataset.pauseEffect) throw new Error("[Pause&Effect] already running on this page");
+root.dataset.pauseEffect = String(Date.now());
+
 watchPlayback({ onPause, onPlay });
 captions.start();
 document.addEventListener("yt-navigate-finish", onNavigate);
