@@ -1,8 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "Pause & Effect",
-  "version": "0.2.0",
-  "description": "You just watch. It builds your study program.",
+  "name": "Scriba",
+  "version": "0.3.0",
+  "description": "Pause any YouTube video and Scriba, a little scribe shiba, explains the line you just heard and turns it into your study deck.",
+  "icons": {
+    "16": "assets/icon-16.png",
+    "32": "assets/icon-32.png",
+    "48": "assets/icon-48.png",
+    "128": "assets/icon-128.png"
+  },
   "background": {
     "service_worker": "dist/background.js"
   },
@@ -25,6 +31,23 @@
     "unlimitedStorage"
   ],
   "action": {
-    "default_title": "Pause & Effect"
-  }
+    "default_title": "Scriba \u00b7 open your deck",
+    "default_icon": {
+      "16": "assets/icon-16.png",
+      "32": "assets/icon-32.png",
+      "48": "assets/icon-48.png",
+      "128": "assets/icon-128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/*",
+        "dist/fx.js"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
+      ]
+    }
+  ]
 }

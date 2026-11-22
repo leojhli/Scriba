@@ -1,8 +1,14 @@
-// Shadow-DOM overlay over #movie_player: cinematic scrim + glass side panel with the mascot,
-// lines, "Hear it clearly" and hold-to-shadow (Task 3).
+// Scriba's UI: one shadow-DOM host over #movie_player holding
+// - chips: small status stickers in the top-left ("Ready · pause anytime");
+// - stage: the translucent overlay that opens on pause, just over the video. Scriba Inu with a
+//   speech bubble, the line you paused on, and a faint three.js paper-scrap field
+//   (fx.ts, loaded on first open). It sits under YouTube's control bar, and clicking the frosted
+//   background reaches the video like any click on the player, so it resumes playback.
 // No innerHTML anywhere: YouTube enforces Trusted Types, so the DOM (and SVG) is built by hand.
+import { WEB_URL } from "./shared/config";
 import type { Explanation, ShadowResult } from "./shared/types";
 import { nextVoiceRate, rateLabel } from "./voiceRate";
+import type { Fx } from "./fx";
 
 export type Line = Explanation["lines"][number];
 
@@ -11,6 +17,7 @@ export type OverlayHandlers = {
   onShadowStart(line: Line, i: number): void;
   onShadowStop(line: Line, i: number): void;
   onClose(): void;
+  onResume(): void;
   onVoiceRate(rate: number): void;
 };
 
@@ -23,12 +30,15 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", ...kids: Kid
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
-const ICONS: Record<string, string> = {
+const ICONS = {
   headphones: "M3 14v-2a9 9 0 0 1 18 0v2M3 14a2 2 0 0 1 2-2h1a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2v-4Zm18 0a2 2 0 0 0-2-2h-1a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1a2 2 0 0 0 2-2v-4Z",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm7 9a7 7 0 0 1-14 0m7 7v3",
   close: "M6 6l12 12M18 6L6 18",
-  gauge: "m12 14 4-4M3.34 19a10 10 0 1 1 17.32 0",
   wifiOff: "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.2-1.6M12 20h.01",
+  gauge: "m12 14 4-4M3.34 19a10 10 0 1 1 17.32 0",
+  play: "M7 4.5v15l12.5-7.5z",
+  deck: "M5 4h11a2 2 0 0 1 2 2v14l-7.5-4L3 20V6a2 2 0 0 1 2-2Z",
+  star: "m12 3 2.7 5.6 6.1.8-4.4 4.3 1 6.1L12 16.9 6.6 19.8l1-6.1-4.4-4.3 6.1-.8Z",
 };
 function icon(name: keyof typeof ICONS): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
@@ -41,198 +51,239 @@ function icon(name: keyof typeof ICONS): SVGSVGElement {
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+const MASCOT = () => chrome.runtime.getURL("assets/scriba-inu.png");
+const NON_LATIN = /(?!\p{Script=Latin})\p{L}/u;
+
+/** What floats on the paper scraps: the line's characters (CJK etc.) or its words (Latin). */
+function glyphsFor(lines: Line[]): string[] {
+  const out = new Set<string>();
+  for (const l of [...lines].reverse()) {
+    const parts = NON_LATIN.test(l.original) ? l.original.match(/\p{L}/gu) : l.original.toLowerCase().match(/\p{L}{3,}/gu);
+    for (const p of parts ?? []) out.add(p);
+    if (out.size >= 12) break;
+  }
+  return [...out].slice(0, 12);
+}
 
 const CSS = `
 :host { all: initial; }
-* { box-sizing: border-box; margin: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
 .wrap { position: absolute; inset: 0; container-type: size; pointer-events: none;
-  font-family: "YouTube Sans", Roboto, "Segoe UI", system-ui, sans-serif; color: #fff;
-  --accent: #ff8a5c; --accent-2: #ffb36b; --glass: rgba(18, 18, 24, .72); --line: rgba(255,255,255,.1);
-  --muted: rgba(255,255,255,.66); --fs: clamp(13px, 1.45cqw, 19px); }
+  --ink: #2b2420; --card: rgba(255,253,248,.9); --shiba: #ffa33c; --shiba-deep: #f08a1c; --ribbon: #d6533a; --muted: #6f6158;
+  --round: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "PingFang SC", "Apple SD Gothic Neo", system-ui, sans-serif;
+  --text: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", sans-serif;
+  font-family: var(--text); font-size: clamp(12px, 1.45cqw, 19px); line-height: 1.45; color: var(--ink); }
 
-/* Cinematic scrim behind the panel */
-.scrim { position: absolute; inset: 0; opacity: 0; transition: opacity .35s ease;
-  background: linear-gradient(270deg, rgba(0,0,0,.72) 0%, rgba(0,0,0,.35) 42%, rgba(0,0,0,0) 70%),
-              linear-gradient(0deg, rgba(0,0,0,.35), rgba(0,0,0,0) 30%); }
-.scrim.on { opacity: 1; }
+/* Stage: frosted, translucent, only over the video */
+.stage { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s; }
+.stage.on { opacity: 1; visibility: visible; transition: opacity .25s ease; }
+.veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,246,234,.66), rgba(255,240,224,.52));
+  backdrop-filter: blur(7px) saturate(1.1); -webkit-backdrop-filter: blur(7px) saturate(1.1); }
+canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; }
 
-/* Glass side panel */
-.panel { pointer-events: auto; position: absolute; top: clamp(10px, 2cqh, 22px); right: clamp(10px, 1.6cqw, 22px);
-  bottom: clamp(56px, 9cqh, 76px); width: clamp(300px, 36cqw, 500px); display: flex; flex-direction: column;
-  background: var(--glass); backdrop-filter: blur(22px) saturate(1.4); -webkit-backdrop-filter: blur(22px) saturate(1.4);
-  border: 1px solid rgba(255,255,255,.14); border-radius: 22px; box-shadow: 0 24px 60px rgba(0,0,0,.5);
-  font-size: var(--fs); line-height: 1.4; overflow: hidden;
-  transform: translateX(24px); opacity: 0; transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease; }
-.panel.on { transform: none; opacity: 1; }
-@container (max-width: 640px) {
-  .panel { left: 10px; right: 10px; width: auto; top: auto; max-height: 64cqh; transform: translateY(24px); }
-  .scrim { background: linear-gradient(0deg, rgba(0,0,0,.75), rgba(0,0,0,0) 75%); }
-}
+.top { position: absolute; top: 3.4cqh; left: 3cqw; right: 3cqw; display: flex; align-items: center; justify-content: space-between; gap: 1em; }
+.brand { display: flex; align-items: center; gap: .5em; min-width: 0; font-family: var(--round); }
+.brand img { width: 1.9em; height: auto; flex: none; }
+.when { font-family: var(--text); color: var(--muted); font-size: .82em; font-weight: 600; white-space: nowrap; }
+.tools { display: flex; align-items: center; gap: .4em; flex: none; pointer-events: auto; }
+.offline-tag { font-family: var(--round); font-size: .74em; color: var(--ribbon); }
 
-.top { display: flex; gap: .85em; align-items: center; padding: 1em 1.1em .85em; border-bottom: 1px solid var(--line); }
-.who { flex: 1; min-width: 0; }
-.name { font-weight: 700; font-size: .95em; letter-spacing: .01em; display: flex; align-items: center; gap: .5em; }
-.when { color: var(--muted); font-size: .8em; font-weight: 500; }
-.x { all: unset; cursor: pointer; width: 2em; height: 2em; display: grid; place-items: center; border-radius: 50%;
-  color: var(--muted); transition: background .15s, color .15s; }
-.x:hover { background: rgba(255,255,255,.12); color: #fff; }
-/* Voice speed pill (header) */
-.speed { all: unset; cursor: pointer; flex: none; display: inline-flex; align-items: center; gap: .3em; padding: .35em .7em;
-  border-radius: 999px; font-size: .78em; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
-  background: rgba(255,255,255,.1); color: rgba(255,255,255,.88); transition: background .15s, color .15s, transform .1s; }
-.speed:hover { background: rgba(255,255,255,.2); color: #fff; }
-.speed:active { transform: scale(.95); }
-.speed:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.speed.custom { color: var(--accent-2); }
-.speed.changed { animation: pop .3s ease-out; }
+.btn { all: unset; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .4em; white-space: nowrap;
+  font-family: var(--round); font-size: .8em; padding: .42em .8em; border-radius: 999px; color: var(--ink);
+  background: rgba(255,253,248,.78); border: 1.5px solid var(--ink); transition: background .15s, transform .1s; }
+.btn:hover { background: #fff; transform: translateY(-1px); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px solid var(--shiba-deep); outline-offset: 2px; }
+.btn.primary { background: var(--shiba); }
+.btn.primary:hover { background: #ffb256; }
+.btn.icon { padding: .42em; }
+.btn.playing { background: var(--ink); color: #fff; }
+.btn.rec { background: var(--ribbon); border-color: var(--ribbon); color: #fff; animation: pulse 1.1s infinite; }
+.btn.speed { font-variant-numeric: tabular-nums; }
+.btn.speed.custom { background: #ffe7c7; }
+.btn.changed { animation: pop .3s ease-out; }
+a.btn { text-decoration: none; }
+.ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
-/* Mascot */
-.mascot { position: relative; flex: none; width: 3em; height: 3em; border-radius: 46% 46% 42% 42%;
-  background: radial-gradient(circle at 32% 28%, #ffd2a8 0 18%, transparent 19%), linear-gradient(160deg, var(--accent-2), var(--accent) 55%, #f0604a);
-  box-shadow: 0 6px 18px rgba(255,120,80,.45), inset 0 -4px 0 rgba(0,0,0,.12); }
-.mascot .eye { position: absolute; top: 38%; width: 13%; height: 19%; border-radius: 50%; background: #1d1220;
-  animation: blink 4.2s infinite; transform-origin: center; }
-.mascot .eye.l { left: 28%; } .mascot .eye.r { right: 28%; }
-.mascot .mouth { position: absolute; left: 50%; bottom: 20%; width: 22%; height: 9%; transform: translateX(-50%);
-  border-radius: 0 0 1em 1em; background: #1d1220; transition: height .1s; }
-.mascot.speaking { animation: bob .5s ease-in-out infinite alternate; }
-.mascot.speaking .mouth { animation: talk .22s ease-in-out infinite alternate; }
-.mascot.thinking { animation: tilt 1.1s ease-in-out infinite; }
-.wave { display: none; gap: 2px; align-items: center; height: 1em; }
-.wave i { display: block; width: 3px; border-radius: 2px; background: var(--accent); animation: wave .9s ease-in-out infinite; }
+/* Scene: Scriba + bubble, then the line */
+.scene { position: absolute; top: 14cqh; bottom: 15cqh; left: 4cqw; right: 4cqw; display: grid;
+  grid-template-columns: 40% minmax(0, 1fr); gap: 4cqw; align-items: center; }
+.hero { display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: .85em; min-height: 0; max-height: 100%; }
+.bubble { pointer-events: auto; position: relative; max-width: 26em; background: var(--card); border: 1.5px solid var(--ink);
+  border-radius: 18px; box-shadow: 2px 3px 0 var(--ink); padding: .75em 1em .85em; font-size: .94em; animation: pop .4s cubic-bezier(.2,1.4,.4,1) .06s both; }
+.bubble::after { content: ""; position: absolute; left: 50%; bottom: -8.5px; width: 14px; height: 14px; background: #fffdf8;
+  border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); transform: translateX(-50%) rotate(45deg); }
+.says { display: flex; align-items: center; gap: .5em; font-family: var(--round); font-size: .66em; letter-spacing: .12em;
+  text-transform: uppercase; color: var(--ribbon); margin-bottom: .2em; }
+.summary.muted { color: var(--muted); font-style: italic; }
+.wave { display: none; gap: 2px; align-items: center; height: .9em; }
+.wave i { display: block; width: 2.5px; border-radius: 2px; background: var(--shiba-deep); animation: wave .9s ease-in-out infinite; }
 .wave i:nth-child(2) { animation-delay: .15s } .wave i:nth-child(3) { animation-delay: .3s } .wave i:nth-child(4) { animation-delay: .45s }
 .speaking-on .wave { display: inline-flex; }
+.dots { display: inline-flex; gap: 5px; margin-left: .35em; vertical-align: middle; }
+.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); animation: dot 1s ease-in-out infinite; }
+.dots i:nth-child(2) { animation-delay: .15s } .dots i:nth-child(3) { animation-delay: .3s }
+.dogwrap { position: relative; width: min(26cqh, 17cqw); animation: enter .5s cubic-bezier(.2,1.5,.4,1) both; }
+.dog { display: block; width: 100%; height: auto; transform-origin: 50% 92%; animation: bob 2.6s ease-in-out infinite alternate; }
+.dog.thinking { animation: tilt 1.3s ease-in-out infinite; }
+.dog.speaking { animation: talk .32s ease-in-out infinite alternate; }
+.floor { position: absolute; left: 22%; right: 22%; bottom: -3px; height: 10px; border-radius: 50%; background: rgba(43,36,32,.12); z-index: -1; }
 
-.body { overflow: auto; padding: .9em 1.1em 1.1em; display: flex; flex-direction: column; gap: .8em;
-  scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.25) transparent; }
-.summary { font-size: 1.02em; color: #fff; }
-.summary.muted { color: var(--muted); font-style: italic; }
-
-/* Skeleton while thinking */
-.sk { height: .9em; border-radius: 6px; background: linear-gradient(90deg, rgba(255,255,255,.07), rgba(255,255,255,.18), rgba(255,255,255,.07));
-  background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
-.sk.w80 { width: 80% } .sk.w60 { width: 60% } .sk.w90 { width: 90% }
-.skcard { padding: .9em; border-radius: 14px; background: rgba(255,255,255,.05); display: flex; flex-direction: column; gap: .55em; }
-
-/* Line cards */
-.card { padding: .85em .95em; border-radius: 16px; background: rgba(255,255,255,.06); border: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: .45em; animation: rise .35s cubic-bezier(.2,.8,.2,1) both; }
-.card.latest { background: rgba(255,138,92,.12); border-color: rgba(255,138,92,.35); }
-.es { font-size: 1.22em; font-weight: 700; line-height: 1.3; letter-spacing: -.005em; }
-.rom { color: #ffc9a8; font-size: .98em; font-weight: 500; letter-spacing: .01em; margin-top: -.15em; }
+.focus { pointer-events: auto; display: flex; flex-direction: column; gap: .9em; max-height: 100%; min-height: 0; overflow: auto; scrollbar-width: none; }
+.card { flex: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 18px; box-shadow: 2px 3px 0 var(--ink);
+  padding: .85em 1.05em .95em; display: flex; flex-direction: column; gap: .3em; animation: rise .35s cubic-bezier(.2,.9,.3,1) both; }
+.tag { font-family: var(--round); font-size: .64em; letter-spacing: .14em; text-transform: uppercase; color: var(--ribbon); }
+.orig { font-family: var(--round); font-size: 1.42em; line-height: 1.3; }
+.rom { color: var(--ribbon); font-weight: 600; }
 .en { color: var(--muted); }
-.notes { display: flex; flex-wrap: wrap; gap: .35em; }
-.notes.folded { display: none; }
-.tag { align-self: flex-start; font-size: .68em; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--accent-2); }
-.more { all: unset; cursor: pointer; padding: .5em .4em; font-size: .78em; font-weight: 600; color: var(--muted); }
-.more:hover { color: #fff; }
-.note { font-size: .78em; padding: .3em .65em; border-radius: 999px; background: rgba(255,255,255,.09); color: rgba(255,255,255,.86); }
-.actions { display: flex; gap: .45em; flex-wrap: wrap; margin-top: .15em; }
-.btn { all: unset; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .45em;
-  padding: .5em .9em; border-radius: 999px; font-size: .84em; font-weight: 650;
-  background: rgba(255,255,255,.12); color: #fff; transition: background .15s, transform .1s; }
-.btn:hover { background: rgba(255,255,255,.2); }
-.btn:active { transform: scale(.97); }
-.btn.primary { background: linear-gradient(135deg, var(--accent-2), var(--accent)); color: #1b0f0a; }
-.btn.primary:hover { filter: brightness(1.06); }
-.btn.playing { background: rgba(255,255,255,.92); color: #111; }
-.btn.rec { background: #ff3b30; color: #fff; box-shadow: 0 0 0 0 rgba(255,59,48,.6); animation: pulse 1.2s infinite; }
-.ico { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.notes { list-style: none; display: flex; flex-direction: column; gap: .2em; margin-top: .25em; font-size: .86em; color: #4a3f37; }
+.notes li { position: relative; padding-left: 1em; }
+.notes li::before { content: ""; position: absolute; left: .1em; top: .62em; width: .36em; height: .36em; border-radius: 50%; background: var(--shiba); }
+.actions { display: flex; gap: .45em; flex-wrap: wrap; margin-top: .45em; }
+.earlier { display: flex; flex-direction: column; gap: .55em; padding: 0 .4em; animation: rise .35s cubic-bezier(.2,.9,.3,1) .08s both; }
+.prev { font-size: .88em; padding-left: .8em; border-left: 2px solid rgba(43,36,32,.25); }
+.prev .o { font-family: var(--round); }
+.prev .r { color: var(--ribbon); font-size: .92em; }
+.prev .t { color: var(--muted); font-size: .92em; }
+.skel { flex: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 18px; padding: 1em; display: flex; flex-direction: column; gap: .6em; }
+.sk { height: .9em; border-radius: 7px; background: linear-gradient(90deg, #f2e4cf, #fbf2e4, #f2e4cf); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.sk.w80 { width: 80% } .sk.w60 { width: 60% } .sk.w40 { width: 40% }
 
 /* Shadowing result */
 .result:empty { display: none; }
-.result { display: flex; gap: .8em; align-items: center; padding-top: .35em; }
-.ring { flex: none; width: 3.1em; height: 3.1em; border-radius: 50%; display: grid; place-items: center;
-  background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(255,255,255,.12) 0); }
-.ring span { width: 2.45em; height: 2.45em; border-radius: 50%; display: grid; place-items: center; background: #1b1b22;
-  font-weight: 800; font-size: .82em; }
+.result { display: flex; gap: .75em; align-items: center; padding-top: .35em; }
+.ring { flex: none; width: 3em; height: 3em; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--ink);
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), #efe2cd 0); }
+.ring span { width: 2.3em; height: 2.3em; border-radius: 50%; display: grid; place-items: center; background: #fffdf8; font-family: var(--round); font-size: .78em; }
 .words { display: flex; flex-wrap: wrap; gap: .25em; }
-.w { padding: .1em .4em; border-radius: 6px; font-weight: 600; font-size: .92em; }
-.w.ok { background: rgba(52,199,89,.22); color: #b5f5c4; }
-.w.missed { background: rgba(255,69,58,.2); color: #ffb3ad; text-decoration: line-through; }
-.w.wrong { background: rgba(255,204,0,.2); color: #ffe48a; }
+.w { padding: .08em .38em; border-radius: 6px; font-weight: 650; font-size: .92em; }
+.w.ok { background: #d9f4dc; color: #1f6b33; }
+.w.missed { background: #ffd9d2; color: #a3321f; text-decoration: line-through; }
+.w.wrong { background: #ffefb8; color: #7a5a00; }
 .w.extra { color: var(--muted); font-style: italic; }
-.pace { color: var(--muted); font-size: .78em; margin-top: .2em; }
-.status { color: var(--muted); font-size: .85em; }
+.pace, .status { color: var(--muted); font-size: .82em; }
 
-/* Chips (top-left) */
-.chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; }
-.chip { display: inline-flex; align-items: center; gap: .4em; padding: .4em .8em; border-radius: 999px; font-size: 13px; font-weight: 650;
-  background: rgba(18,18,24,.75); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.14); animation: rise .25s ease-out both; }
-.chip.offline, .chip.warn { color: #ffd27a; }
-.chip.ok { color: #b5f5c4; }
-.spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid rgba(255,255,255,.25);
-  border-top-color: var(--accent); animation: spin .8s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* Status chips (hidden while the stage is open) */
+.chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; transition: opacity .2s; }
+.wrap.open .chips { opacity: 0; }
+.chip { display: inline-flex; align-items: center; gap: .45em; padding: .35em .8em .35em .4em; border-radius: 999px; font-family: var(--round);
+  font-size: 13px; color: var(--ink); background: rgba(255,247,236,.94); border: 1.5px solid var(--ink); animation: rise .25s ease-out both; }
+.chip img { width: 20px; height: auto; }
+.chip.ok { background: rgba(230,247,225,.95); } .chip.warn { background: rgba(255,231,199,.95); } .chip.offline { background: rgba(255,220,210,.95); }
+.spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid #f3d9b4; border-top-color: var(--shiba-deep); animation: spin .8s linear infinite; }
 
-@keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
-@keyframes bob { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-4px) rotate(2deg); } }
-@keyframes talk { from { height: 6%; } to { height: 16%; } }
-@keyframes tilt { 0%, 100% { transform: rotate(-6deg); } 50% { transform: rotate(6deg); } }
+@container (max-width: 640px) {
+  .scene { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); top: 12cqh; gap: 2.5cqh; }
+  .hero { flex-direction: row-reverse; align-items: flex-end; }
+  .dogwrap { width: 16cqw; }
+  .bubble::after { left: auto; right: -8.5px; bottom: 14px; transform: rotate(-45deg); }
+  .tools .label, .when { display: none; }
+}
+
+@keyframes bob { from { transform: translateY(0) rotate(-1.5deg); } to { transform: translateY(-6%) rotate(1.5deg); } }
+@keyframes talk { from { transform: translateY(0) scale(1, 1); } to { transform: translateY(-5%) scale(1.03, .97); } }
+@keyframes tilt { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
+@keyframes enter { from { transform: translateY(30px) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pop { 0% { transform: scale(.88); opacity: 0; } 100% { transform: none; opacity: 1; } }
+@keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes wave { 0%, 100% { height: 25%; } 50% { height: 100%; } }
+@keyframes dot { 0%, 100% { transform: translateY(0); opacity: .45; } 50% { transform: translateY(-4px); opacity: 1; } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
-@keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pop { 50% { transform: scale(1.12); background: rgba(255,138,92,.35); } }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,48,.55); } 100% { box-shadow: 0 0 0 12px rgba(255,59,48,0); } }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(214,83,58,.5); } 100% { box-shadow: 0 0 0 10px rgba(214,83,58,0); } }
+@keyframes spin { to { transform: rotate(360deg); } }
 `;
 
-const HOST_ID = "pause-and-effect-root";
+const HOST_ID = "scriba-root";
 
 export class Overlay {
   private host: HTMLDivElement | null = null;
   private wrap!: HTMLDivElement;
-  private scrim!: HTMLDivElement;
+  private stage!: HTMLDivElement;
+  private canvas: HTMLCanvasElement | null = null;
   private chips!: HTMLDivElement;
   private offlineChip: HTMLDivElement | null = null;
   private statusChip: HTMLDivElement | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
-  private panel: HTMLDivElement | null = null;
-  private mascot: HTMLDivElement | null = null;
-  private top: HTMLDivElement | null = null;
+  private content: HTMLElement[] = [];
+  private bubble: HTMLDivElement | null = null;
+  private summaryEl: HTMLDivElement | null = null;
+  private focusEl: HTMLDivElement | null = null;
+  private dog: HTMLImageElement | null = null;
   private speedBtn: HTMLButtonElement | null = null;
-  private voiceRate = 1;
+  private offlineTag: HTMLSpanElement | null = null;
   private results: HTMLDivElement[] = [];
   private shadowBtns: HTMLButtonElement[] = [];
   private hearBtns: HTMLButtonElement[] = [];
   private recTimer: ReturnType<typeof setInterval> | undefined;
+  private closeTimer: ReturnType<typeof setTimeout> | undefined;
+  private open = false;
   private hidden = false;
+  private isOffline = false;
+  private isSpeaking = false;
+  private voiceRate = 1;
+  // three.js paper field
+  private fx: Fx | null = null;
+  private fxLoading = false;
+  private glyphs: string[] = [];
 
-  constructor(private handlers: OverlayHandlers) {}
+  constructor(private handlers: OverlayHandlers) {
+    // Esc closes the overlay even when focus is on the page (YouTube doesn't use Esc itself).
+    document.addEventListener("keydown", (e) => {
+      if (this.open && e.key === "Escape") this.handlers.onClose();
+    });
+  }
 
   private ensure(): boolean {
     const player = document.querySelector<HTMLElement>("#movie_player");
     if (!player) return false;
     if (this.host?.isConnected && this.host.parentElement === player) return true;
     document.getElementById(HOST_ID)?.remove();
+    this.fx?.dispose(); // its canvas goes away with the old host
+    this.fx = null;
+    this.fxLoading = false;
     this.host = h("div");
     this.host.id = HOST_ID;
-    // z-index 59 keeps us under YouTube's own control bar and settings menus (60+).
+    // z-index 59 keeps us under YouTube's own control bar and menus (60+).
     this.host.style.cssText = "position:absolute;inset:0;z-index:59;pointer-events:none;";
     this.host.style.display = this.hidden ? "none" : "";
     const root = this.host.attachShadow({ mode: "open" });
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(CSS);
     root.adoptedStyleSheets = [sheet];
-    this.wrap = h("div", "wrap");
-    this.scrim = h("div", "scrim");
+    this.canvas = h("canvas", "fx");
+    this.stage = h("div", "stage", h("div", "veil"), this.canvas);
+    // Keep clicks and keys on our controls from reaching YouTube's player (which would toggle play/pause).
+    // The veil itself lets clicks through: clicking the video resumes it, as usual.
+    for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu"])
+      this.stage.addEventListener(ev, (e) => {
+        if (e.target !== this.stage) e.stopPropagation();
+      });
+    this.stage.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Escape") this.handlers.onClose();
+      else if (e.key === " " || e.key === "k") {
+        e.preventDefault();
+        this.handlers.onResume();
+      }
+    });
     this.chips = h("div", "chips");
-    this.wrap.append(this.scrim, this.chips);
+    this.wrap = h("div", "wrap", this.stage, this.chips);
+    root.append(this.wrap);
     if (this.statusChip) this.chips.append(this.statusChip);
     if (this.offlineChip) this.chips.append(this.offlineChip);
-    root.append(this.wrap);
     player.appendChild(this.host);
-    this.panel = null;
+    this.open = false;
+    this.content = [];
     return true;
   }
 
-  /** Hides everything (panel and chips), e.g. while an ad plays. */
-  setHidden(hidden: boolean): void {
-    this.hidden = hidden;
-    if (this.host) this.host.style.display = hidden ? "none" : "";
-  }
+  // ---------- Chips ----------
 
   chip(text: string, ms = 2200): void {
+    if (this.open && this.summaryEl) {
+      this.summaryEl.replaceChildren(text); // the chips are hidden under the open stage
+      return;
+    }
     if (!this.ensure()) return;
     const c = h("div", "chip", text);
     this.chips.append(c);
@@ -245,13 +296,18 @@ export class Overlay {
     this.statusChip?.remove();
     this.statusChip = null;
     if (!text || !this.ensure()) return;
-    const c = h("div", `chip ${kind}`, kind === "busy" && h("span", "spin"), text);
+    const face = h("img");
+    face.src = MASCOT();
+    face.alt = "";
+    const c = h("div", `chip ${kind}`, face, kind === "busy" && h("span", "spin"), text);
     this.statusChip = c;
     this.chips.prepend(c);
     if (ms) this.statusTimer = setTimeout(() => this.status(null), ms);
   }
 
   offline(on: boolean): void {
+    this.isOffline = on;
+    if (this.offlineTag) this.offlineTag.style.display = on ? "" : "none";
     if (!this.ensure()) return;
     if (on && !this.offlineChip) {
       this.offlineChip = h("div", "chip offline", icon("wifiOff"), "offline mode");
@@ -262,118 +318,184 @@ export class Overlay {
     }
   }
 
-  private newPanel(t: number | null): HTMLDivElement | null {
-    if (!this.ensure()) return null;
-    this.panel?.remove();
-    clearInterval(this.recTimer);
-    const p = h("div", "panel");
-    // Keep clicks and keys from reaching YouTube's player (which would toggle play/pause).
-    for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "keydown", "wheel", "contextmenu"])
-      p.addEventListener(ev, (e) => e.stopPropagation());
+  /** Hides everything, e.g. while an ad plays. */
+  setHidden(hidden: boolean): void {
+    this.hidden = hidden;
+    if (this.host) this.host.style.display = hidden ? "none" : "";
+    if (hidden) this.fx?.stop();
+    else if (this.open) this.fx?.start();
+  }
 
-    this.mascot = h("div", "mascot", h("div", "eye l"), h("div", "eye r"), h("div", "mouth"));
-    const wave = h("span", "wave", h("i"), h("i"), h("i"), h("i"));
-    const close = h("button", "x", icon("close"));
-    close.title = "Close (or press play)";
-    close.addEventListener("click", () => this.handlers.onClose());
-    const speed = h("button", "speed");
-    speed.title = "Voice speed · click to change";
-    speed.addEventListener("click", () => this.handlers.onVoiceRate(nextVoiceRate(this.voiceRate)));
-    this.fillSpeed(speed);
-    this.speedBtn = speed;
-    this.top = h(
-      "div",
-      "top",
-      this.mascot,
-      h("div", "who", h("div", "name", "Pausa", wave), h("div", "when", t === null ? "" : `Paused at ${fmt(t)}`)),
-      speed,
-      close,
-    );
-    p.append(this.top);
-    this.wrap.append(p);
-    this.panel = p;
+  // ---------- Stage ----------
+
+  private loadFx(): void {
+    if (this.fx || this.fxLoading || !this.canvas) return;
+    this.fxLoading = true;
+    const canvas = this.canvas;
+    (import(chrome.runtime.getURL("dist/fx.js")) as Promise<typeof import("./fx")>)
+      .then((mod) => {
+        if (canvas !== this.canvas) return;
+        this.fx = mod.createFx(canvas);
+        this.fx.setGlyphs(this.glyphs);
+        this.fx.setSpeaking(this.isSpeaking);
+        if (this.open && !this.hidden) this.fx.start();
+      })
+      .catch((err) => console.warn("[Scriba] paper field unavailable", err)); // the overlay works without it
+  }
+
+  /** Builds the top row and Scriba with the bubble, then fades the stage in. */
+  private build(t: number | null): boolean {
+    if (!this.ensure()) return false;
+    clearTimeout(this.closeTimer);
+    clearInterval(this.recTimer);
+    for (const el of this.content) el.remove();
     this.results = [];
     this.shadowBtns = [];
     this.hearBtns = [];
-    requestAnimationFrame(() => {
-      p.classList.add("on");
-      this.scrim.classList.add("on");
-    });
-    return p;
+
+    const logo = h("img");
+    logo.src = MASCOT();
+    logo.alt = "";
+    this.offlineTag = h("span", "offline-tag", "offline");
+    this.offlineTag.style.display = this.isOffline ? "" : "none";
+
+    const speed = h("button", "btn speed");
+    speed.title = "Voice speed · click to change";
+    speed.addEventListener("click", () => this.handlers.onVoiceRate(nextVoiceRate(this.voiceRate)));
+    this.speedBtn = speed;
+    this.fillSpeed(speed);
+
+    const link = (path: string, ico: keyof typeof ICONS, label: string, tip: string) => {
+      const a = h("a", "btn", icon(ico), h("span", "label", label));
+      a.href = `${WEB_URL}${path}`;
+      a.target = "_blank";
+      a.rel = "noopener";
+      a.title = tip;
+      return a;
+    };
+    const resume = h("button", "btn icon primary", icon("play"));
+    resume.title = "Keep watching (Space)";
+    resume.setAttribute("aria-label", "Keep watching");
+    resume.addEventListener("click", () => this.handlers.onResume());
+    const close = h("button", "btn icon", icon("close"));
+    close.title = "Close (Esc)";
+    close.setAttribute("aria-label", "Close");
+    close.addEventListener("click", () => this.handlers.onClose());
+
+    const top = h(
+      "div",
+      "top",
+      h("div", "brand", logo, h("span", "", "Scriba"), t !== null && h("span", "when", `paused at ${fmt(t)}`), this.offlineTag),
+      h(
+        "div",
+        "tools",
+        speed,
+        link("/deck", "deck", "Deck", "Your deck: every line you paused on"),
+        link("/practice", "star", "Practice", "Practise your top lines"),
+        resume,
+        close,
+      ),
+    );
+
+    this.summaryEl = h("div", "summary");
+    const wave = h("span", "wave", h("i"), h("i"), h("i"), h("i"));
+    this.bubble = h("div", "bubble", h("div", "says", "Scriba", wave), this.summaryEl);
+    this.dog = h("img", "dog");
+    this.dog.src = MASCOT();
+    this.dog.alt = "Scriba, a shiba inu holding a scroll";
+    this.focusEl = h("div", "focus");
+    const scene = h("div", "scene", h("div", "hero", this.bubble, h("div", "dogwrap", h("div", "floor"), this.dog)), this.focusEl);
+
+    this.content = [top, scene];
+    this.stage.append(top, scene);
+    this.open = true;
+    this.wrap.classList.add("open");
+    requestAnimationFrame(() => this.stage.classList.add("on"));
+    this.loadFx();
+    if (!this.hidden) this.fx?.start();
+    return true;
   }
 
   /** Shown immediately on pause, so the overlay is never blank. */
   thinking(t: number | null = null): void {
-    const p = this.newPanel(t);
-    if (!p) return;
-    this.mascot!.classList.add("thinking");
-    const skel = () => h("div", "skcard", h("div", "sk w80"), h("div", "sk w60"));
-    p.append(h("div", "body", h("div", "summary muted", "Thinking about what was just said…"), skel(), skel()));
+    if (!this.build(t)) return;
+    this.isSpeaking = false;
+    this.dog?.classList.add("thinking");
+    this.summaryEl?.classList.add("muted");
+    this.summaryEl?.replaceChildren("Reading the scroll", h("span", "dots", h("i"), h("i"), h("i")));
+    this.focusEl?.replaceChildren(h("div", "skel", h("div", "sk w60"), h("div", "sk w80"), h("div", "sk w40")));
   }
 
   explanation(e: Explanation, can: { hear(line: Line): boolean; shadow(line: Line): boolean }, t: number | null = null): void {
-    const p = this.newPanel(t);
-    if (!p) return;
-    const body = h("div", "body", h("div", e.lines.length ? "summary" : "summary muted", e.summary));
-    const cards: HTMLDivElement[] = [];
-    e.lines.forEach((line, i) => {
-      const actions = h("div", "actions");
-      if (can.hear(line)) {
-        const hear = h("button", "btn", icon("headphones"), "Hear it clearly");
-        hear.title = "Just the voice, music removed, at 0.75×";
-        hear.addEventListener("click", () => this.handlers.onHear(line, i));
-        actions.append(hear);
-        this.hearBtns[i] = hear;
-      }
-      if (can.shadow(line)) {
-        const sh = h("button", "btn primary", icon("mic"), "Hold to shadow");
-        sh.title = "Hold, say the line, release to get scored";
-        sh.addEventListener("pointerdown", (ev) => {
-          ev.preventDefault();
-          sh.setPointerCapture(ev.pointerId);
-          this.handlers.onShadowStart(line, i);
-        });
-        const stop = () => this.handlers.onShadowStop(line, i);
-        sh.addEventListener("pointerup", stop);
-        sh.addEventListener("pointercancel", stop);
-        actions.append(sh);
-        this.shadowBtns[i] = sh;
-      }
-      const result = h("div", "result");
-      this.results[i] = result;
-      const latest = i === e.lines.length - 1;
-      // Notes are open on the line you most likely paused for; folded on the earlier ones.
-      const notes = line.notes.length > 0 ? h("div", latest ? "notes" : "notes folded", ...line.notes.map((n) => h("span", "note", n))) : null;
-      if (notes && !latest) {
-        const more = h("button", "more", `Notes (${line.notes.length})`);
-        more.addEventListener("click", () => {
-          notes.classList.toggle("folded");
-          more.textContent = notes.classList.contains("folded") ? `Notes (${line.notes.length})` : "Hide notes";
-        });
-        actions.append(more);
-      }
-      const card = h(
-        "div",
-        latest ? "card latest" : "card",
-        latest && h("div", "tag", "Just said"),
-        h("div", "es", line.original),
-        line.romanization && h("div", "rom", line.romanization),
-        line.translation && h("div", "en", line.translation),
-        notes,
-        actions.childElementCount > 0 && actions,
-        result,
-      );
-      cards.push(card);
-    });
-    // Newest first: the line you paused for sits right under the summary.
-    cards.reverse().forEach((c, k) => {
-      c.style.animationDelay = `${k * 60}ms`;
-      body.append(c);
-    });
-    p.append(body);
+    if ((!this.open || !this.focusEl) && !this.build(t)) return;
+    this.dog?.classList.remove("thinking");
+    this.summaryEl?.classList.toggle("muted", !e.lines.length);
+    this.summaryEl?.replaceChildren(e.summary);
+    this.results = [];
+    this.shadowBtns = [];
+    this.hearBtns = [];
+
+    const i = e.lines.length - 1;
+    if (i < 0) {
+      this.focusEl?.replaceChildren();
+      return;
+    }
+    // The line you paused for gets the card and the buttons; earlier ones are quiet rows below.
+    const line = e.lines[i];
+    const actions = h("div", "actions");
+    if (can.hear(line)) {
+      const hear = h("button", "btn", icon("headphones"), "Hear it clearly");
+      hear.title = "Just the voice, music removed, at 0.75×";
+      hear.addEventListener("click", () => this.handlers.onHear(line, i));
+      actions.append(hear);
+      this.hearBtns[i] = hear;
+    }
+    if (can.shadow(line)) {
+      const sh = h("button", "btn primary", icon("mic"), "Hold to shadow");
+      sh.title = "Hold, say the line, release to get scored";
+      sh.addEventListener("pointerdown", (ev) => {
+        ev.preventDefault();
+        sh.setPointerCapture(ev.pointerId);
+        this.handlers.onShadowStart(line, i);
+      });
+      const stop = () => this.handlers.onShadowStop(line, i);
+      sh.addEventListener("pointerup", stop);
+      sh.addEventListener("pointercancel", stop);
+      actions.append(sh);
+      this.shadowBtns[i] = sh;
+    }
+    const result = h("div", "result");
+    this.results[i] = result;
+    const card = h(
+      "div",
+      "card",
+      h("div", "tag", "Just said"),
+      h("div", "orig", line.original),
+      line.romanization && h("div", "rom", line.romanization),
+      line.translation && h("div", "en", line.translation),
+      line.notes.length > 0 && h("ul", "notes", ...line.notes.map((n) => h("li", "", n))),
+      actions.childElementCount > 0 && actions,
+      result,
+    );
+    // Minimal: only the line right before it, for context.
+    const earlier = e.lines
+      .slice(Math.max(0, i - 1), i)
+      .map((l) => h("div", "prev", h("div", "o", l.original), l.romanization && h("div", "r", l.romanization), l.translation && h("div", "t", l.translation)));
+    this.focusEl?.replaceChildren(card, ...(earlier.length ? [h("div", "earlier", ...earlier)] : []));
+
+    this.glyphs = glyphsFor(e.lines);
+    this.fx?.setGlyphs(this.glyphs);
   }
 
-  /** The speed shown in the header pill. Pops when it changes. */
+  speaking(on: boolean): void {
+    this.isSpeaking = on;
+    this.dog?.classList.remove("thinking");
+    this.dog?.classList.toggle("speaking", on);
+    this.bubble?.classList.toggle("speaking-on", on);
+    this.fx?.setSpeaking(on);
+  }
+
+  /** The speed shown in the top-right pill. Pops when it changes. */
   setVoiceRate(rate: number): void {
     const changed = rate !== this.voiceRate;
     this.voiceRate = rate;
@@ -389,12 +511,6 @@ export class Overlay {
       void b.offsetWidth; // restart the animation
       b.classList.add("changed");
     }
-  }
-
-  speaking(on: boolean): void {
-    this.mascot?.classList.remove("thinking");
-    this.mascot?.classList.toggle("speaking", on);
-    this.top?.classList.toggle("speaking-on", on);
   }
 
   hearing(i: number, on: boolean): void {
@@ -430,7 +546,7 @@ export class Overlay {
       return;
     }
     const pct = Math.round(r.accuracy * 100);
-    const color = pct >= 80 ? "#34c759" : pct >= 50 ? "#ffcc00" : "#ff453a";
+    const color = pct >= 80 ? "#3fb55e" : pct >= 50 ? "#ffb21c" : "#d6533a";
     const ring = h("div", "ring", h("span", "", `${pct}%`));
     ring.style.setProperty("--p", String(pct));
     ring.style.setProperty("--c", color);
@@ -452,15 +568,21 @@ export class Overlay {
 
   hideBubble(): void {
     clearInterval(this.recTimer);
-    const p = this.panel;
-    this.panel = null;
-    this.mascot = null;
-    this.top = null;
+    if (!this.open) return;
+    this.open = false;
+    this.isSpeaking = false;
+    this.stage.classList.remove("on");
+    this.wrap.classList.remove("open");
+    this.closeTimer = setTimeout(() => {
+      if (this.open) return;
+      this.fx?.stop();
+      for (const el of this.content) el.remove();
+      this.content = [];
+    }, 300);
+    this.dog = null;
+    this.bubble = null;
+    this.summaryEl = null;
+    this.focusEl = null;
     this.speedBtn = null;
-    this.scrim?.classList.remove("on");
-    if (p) {
-      p.classList.remove("on");
-      setTimeout(() => p.remove(), 300);
-    }
   }
 }

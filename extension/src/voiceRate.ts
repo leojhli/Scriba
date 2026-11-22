@@ -1,4 +1,4 @@
-// How fast Pausa's spoken reply plays. The pill in the panel header cycles through these,
+// How fast Scriba's spoken reply plays. The pill in the panel header cycles through these,
 // and the choice is saved in chrome.storage so it sticks across videos, tabs and restarts.
 export const VOICE_RATES: readonly number[] = [0.75, 1, 1.25, 1.5, 2];
 

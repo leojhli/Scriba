@@ -11,7 +11,7 @@ import { loadVoiceRate, onVoiceRateChange, rateLabel, saveVoiceRate } from "./vo
 
 type Session = { status: "processing" | "ready" | "failed"; segments: Segment[] | null; hasDialogue: boolean };
 
-const log = (...a: unknown[]) => console.log("%c[Pause&Effect]", "color:#ff7a59;font-weight:bold", ...a);
+const log = (...a: unknown[]) => console.log("%c[Scriba]", "color:#f08a1c;font-weight:bold", ...a);
 
 let videoId: string | null = null;
 let session: Session | null = null;
@@ -27,7 +27,7 @@ let voiceRate = 1;
 
 const captions = new CaptionBuffer();
 const recorder = new Recorder();
-const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose, onVoiceRate });
+const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose, onResume, onVoiceRate });
 let clipIndex = -1;
 
 function player(): HTMLVideoElement | null {
@@ -190,7 +190,14 @@ function stopAudio(): void {
   overlay.speaking(false);
 }
 
-/** The × on the panel: dismiss without resuming the video. */
+/** "Keep watching" (or Space) on the overlay: resume the video, which also closes the overlay. */
+function onResume(): void {
+  player()
+    ?.play()
+    .catch(() => {});
+}
+
+/** The × on the overlay (or Esc): dismiss without resuming the video. */
 function onClose(): void {
   explainSeq++;
   stopAudio();
@@ -279,7 +286,7 @@ async function onShadowStop(line: Line, i: number): Promise<void> {
 // One instance per page, even if the extension is reloaded or injected twice
 // (the DOM is shared between isolated worlds, so the flag is too).
 const root = document.documentElement;
-if (root.dataset.pauseEffect) throw new Error("[Pause&Effect] already running on this page");
+if (root.dataset.pauseEffect) throw new Error("[Scriba] already running on this page");
 root.dataset.pauseEffect = String(Date.now());
 
 watchPlayback({ onPause, onPlay });

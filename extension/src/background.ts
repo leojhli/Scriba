@@ -2,7 +2,7 @@
 // host_permissions on localhost:3001 means no CORS setup is needed.
 // Every call has a timeout; explain/session fall back to chrome.storage caches (Task 8).
 import type { BgRequest, BgResponse, MediaResponse } from "./messages";
-import { DEMO_KEY, EXPLAIN_TIMEOUT_MS, MEDIA_TIMEOUT_MS, REQUEST_TIMEOUT_MS, SERVER_URL, SHADOW_TIMEOUT_MS } from "./shared/config";
+import { DEMO_KEY, EXPLAIN_TIMEOUT_MS, MEDIA_TIMEOUT_MS, REQUEST_TIMEOUT_MS, SERVER_URL, SHADOW_TIMEOUT_MS, WEB_URL } from "./shared/config";
 import type { Explanation } from "./shared/types";
 
 async function post(path: string, body: unknown): Promise<unknown> {
@@ -103,3 +103,6 @@ chrome.runtime.onMessage.addListener((msg: BgRequest, _sender, sendResponse) => 
   }
   return false;
 });
+
+// The toolbar button opens your deck.
+chrome.action.onClicked.addListener(() => void chrome.tabs.create({ url: `${WEB_URL}/deck` }));
