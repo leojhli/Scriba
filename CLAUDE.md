@@ -6,7 +6,28 @@ Making study material from media is work learners do by hand today: pausing, loo
 
 **Goal:** A Chrome extension that overlays real YouTube and turns whatever you watch into a study program, backed by a Wasp app. Built and demoed live in the 11:00–3:00 window (ElevenLabs hackathon).
 
-This file is the implementation plan (v3). The **Interfaces** section is a contract between four people: don't change it without telling the team.
+This file is the implementation plan (v3), updated to match what's built. The **Interfaces** section is a contract between four people: don't change it without telling the team. **To run the demo, see [DEMO.md](DEMO.md).**
+
+## Status (2026-11-22, ~12:00)
+
+| Task | State |
+|---|---|
+| 0 Skeletons | ✅ done |
+| 1 Ingest + session | ✅ built; yt-dlp + ffmpeg verified live. **Needs `ELEVENLABS_API_KEY`** for Scribe + Isolator |
+| 2 Struggle detection | ❌ **removed by decision**: pause is the only signal (see below) |
+| 3 Overlay + pause flow | ✅ built (`window()` tested) |
+| 4 Explanation + voice | ✅ built; endpoint + fallbacks verified. **Needs `ANTHROPIC_API_KEY`** + ElevenLabs key |
+| 5 Hear it clearly | ✅ built |
+| 6 Shadowing | ✅ built (`score()` tested; silent attempt → 0, verified) |
+| 7 Deck + practice | ✅ built; `getDeck` verified |
+| 8 Unbreakable demo | ✅ server + extension caches, offline chip, `npm run cache:export`, `wasp db seed`. **Still to do:** process + export the 2 demo videos |
+| 9 Submission | README done; video, screenshots, diagram still to do |
+
+Not yet tested in a real Chrome session with API keys: the overlay on youtube.com, voice playback, the mic, and Voice Isolator output.
+
+## Scope decision: pause is the only signal
+
+The team decided to drop rewind/replay/captions-on/slowdown tracking. **Pausing is the whole interaction: pause → explanation + voice, and the line goes into the deck.** The deck ranks lines by how many times you paused on them. There is no `/ext/struggle`, no `struggle.ts` and no "flagged" chips. The extension still *reads* on-screen captions, but only as the transcript fallback while Scribe is processing.
 
 ---
 
@@ -18,14 +39,26 @@ wasp-app/    Wasp 0.22 app (React + Node + Prisma/SQLite)
 demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
 ```
 
-- **Toolchain on the demo laptop (Intel Mac):** Node 22 lives in `~/.local/node/bin` because Homebrew can't build here (the Command Line Tools are too old). Put it on PATH: `export PATH=$HOME/.local/node/bin:$PATH`. npm is v11 because npm 10 crashes with "edgesOut" during `wasp compile`. Install Wasp with `npm i -g @wasp.sh/wasp-cli`, not the old installer script. yt-dlp is in `/usr/local/bin`. **ffmpeg is not installed yet** (Homebrew needs newer CLT). Get a static binary before Task 1.
+- **Toolchain on the demo laptop (Intel Mac):** Homebrew can't build here (the Command Line Tools are too old), so everything lives in `~/.local`, and `~/.zshrc` puts `~/.local/node/bin` and `~/.local/bin` on PATH:
+  - Node 22 in `~/.local/node`. npm is v11, because npm 10 crashes with "edgesOut" during `wasp compile`.
+  - Wasp 0.22 via `npm i -g @wasp.sh/wasp-cli`, not the old installer script.
+  - Static ffmpeg 6.0 at `~/.local/bin/ffmpeg`.
+  - yt-dlp 2026.10.26 at `~/.local/bin/yt-dlp`. The old `/usr/local/bin/yt-dlp` (2025.06) fails on YouTube with "The page needs to be reloaded". YouTube now needs a JS runtime, so ingest passes `--js-runtimes node:<server's node>`.
+  - The server auto-detects both binaries; override with `FFMPEG_PATH` / `YTDLP_PATH`.
 - **Run the backend:** `cd wasp-app && cp .env.server.example .env.server` (fill in the keys), then `wasp db migrate-dev`, then `wasp start`. The server runs on `localhost:3001` and the client on `localhost:3000`.
 - **Build the extension:** `cd extension && npm i && npm run build` (or `npm run watch`). Load it unpacked from `extension/` at `chrome://extensions`, and reload it after each build.
 - **Tests:** run `npm test` (vitest) in either package.
 - **Deviations from the plan:**
   - `Video.segments` is `String?` (holding `JSON.stringify(Segment[])`), not `Json?`, because Prisma 5 + SQLite has no Json type. Parse it on read.
   - The content script matches `https://www.youtube.com/*` (not only `/watch*`) so it survives YouTube's SPA navigation into a video. Check `location.pathname === "/watch"` in code.
-  - Pause/play are caught with document-level **capture** listeners, so swapping the `<video>` element doesn't break them.
+  - Pause/play are caught with document-level **capture** listeners, so swapping the `<video>` element doesn't break them. A pause only triggers an explanation if it lasts 250 ms (YouTube pauses briefly while scrubbing). Ads are ignored.
+  - `Video.status` can also be `"failed"`. The extension stops polling, and a page reload retries the ingest (e.g. after adding keys).
+  - `Explanation` has an optional `offline: true` when it came from a cache.
+  - `/ext/shadow` also accepts `text` and `origDur`, so captions-only lines (`segmentId: -1`) can be scored before Scribe is ready. Those attempts aren't saved.
+  - **No innerHTML in the extension:** YouTube enforces Trusted Types, so the overlay builds its DOM with a small `h()` helper and styles via `adoptedStyleSheets`. Clicks inside the bubble call `stopPropagation()` so they don't toggle YouTube's play/pause.
+  - Media goes from the background worker to the content script as base64, and the content script turns it into a `blob:` URL. Service workers can't create blob URLs.
+  - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 5.5 s timeout. TTS uses the stock voice `JBFqnCBsd6RMkjVDRZzb` with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
+  - **Git:** commit as the user's identity, with no `Co-Authored-By: Claude` trailer.
 - **Extension ↔ background messaging:** the content script calls `chrome.runtime.sendMessage({ type: "api", path, body })` and gets back `{ ok: true, data } | { ok: false, error }`. The background worker adds `x-demo-key` and the 8 s timeout (`extension/src/shared/config.ts`).
 - **Server auth for /ext/\*:** call `checkDemoKey(req, res)` from `wasp-app/src/server/demoKey.ts` at the top of every ext handler.
 - **Shared code:** `src/shared/types.ts` and `config.ts` are duplicated in both packages and must stay identical (the extension's config also holds SERVER_URL, DEMO_KEY and REQUEST_TIMEOUT_MS).
@@ -35,9 +68,9 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
 ## The pipeline (this is the product)
 
 1. **Watches alongside you.** When a video opens, the backend transcribes it with ElevenLabs Scribe, and the extension also reads the on-screen captions live. It always knows what was just said.
-2. **Notices what you struggle with.** Pauses, rewinds, replaying a line, turning captions on and slowing down are all signals. It flags those moments without being asked, and a small chip on the player says so ("flagged").
-3. **Explains on pause.** The mascot bubble appears over the paused video and explains the last few lines and the scene out loud. It knows why you're stuck ("you rewound this twice").
-4. **Builds your deck.** Every flagged moment becomes a card in the Wasp web app, ranked by how much you struggled.
+2. ~~Notices what you struggle with (rewinds, captions, slowdown).~~ **Removed: pause is the only signal.**
+3. **Explains on pause.** The mascot bubble appears over the paused video and explains the last few lines and the scene out loud.
+4. **Builds your deck.** Every line you paused on becomes a card in the Wasp web app, ranked by how many times you paused there.
 5. **Turns it into practice.** Each card has "Hear it clearly" (dialogue with the music removed, slowed down) and shadowing (say the line and get scored word by word).
 
 ## Architecture
@@ -47,7 +80,7 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
 - A background service worker makes every call to the backend, so there's no CORS setup.
 
 **Wasp app:**
-- Custom api endpoints for the extension: ingest, struggle logging, explain and shadow.
+- Custom api endpoints for the extension: ingest, explain (which also logs the pause) and shadow.
 - Prisma storage.
 - Two pages for the study program, `/deck` and `/practice`.
 - Server work per video: download the first 3 minutes with yt-dlp, then run ElevenLabs Scribe for the transcript and Voice Isolator for the dialogue track. Claude writes the explanations.
@@ -76,7 +109,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 
 1. **A pause before any line has been said, or mid-sentence.** The window includes overlapping lines. With none, the bubble says "Nothing's been said yet." (Task 3 test)
 2. **Captions are off, or the video has none.** Lines come from the server's Scribe transcript. While that's still processing, the overlay says "Still listening…" instead of failing. (Task 1 check)
-3. **YouTube's own seeking:** clicking ahead, the 10 s skip forward and ads are not rewinds. Only backward jumps of 2–30 s count. (Task 2 test)
+3. **Ads and scrubbing:** pauses during ads are ignored, and a pause must last 250 ms before it explains anything (YouTube pauses briefly while scrubbing).
 4. **A silent or mumbled shadowing attempt** gives accuracy 0 with every word missed, never an error. Accents and punctuation still match (`"¿Qué?"` = `"que"`). (Task 6 test)
 5. **Slow Wi-Fi or an API outage mid-demo.** The overlay falls back to cached results within 8 s and shows an "offline mode" chip. (Task 8 check)
 
@@ -89,7 +122,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 | 11:00–11:25 | Task 0: A builds the Wasp skeleton, B the extension skeleton. C and D write the pure modules and their tests (Tasks 2a, 6a). |
 | 11:25–12:30 | **V0** end to end: open a video → ingest → pause → overlay shows the explanation text (Tasks 1, 3, 4 text-only) |
 | 12:30–12:45 | Lunch at your desk |
-| 12:45–1:50 | **V1**: struggle flags, mascot voice, "Hear it clearly", shadowing, deck + practice pages (Tasks 2b, 4, 5, 6, 7) |
+| 12:45–1:50 | **V1**: mascot voice, "Hear it clearly", shadowing, deck + practice pages (Tasks 4, 5, 6, 7) |
 | 1:50–2:10 | Fallbacks + polish (Task 8). **Feature freeze at 2:10.** |
 | 2:10–2:45 | Demo video, screenshots, architecture diagram, submission (Task 9) |
 | 2:45–2:55 | Submit |
@@ -107,15 +140,9 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 
 ```ts
 export type Segment = { id: number; start: number; end: number; text: string }
-export type PlayerEvent =
-  | { type: "pause" | "play"; t: number; at: number }
-  | { type: "seek"; from: number; t: number; at: number }
-  | { type: "rate"; t: number; value: number; at: number }
-  | { type: "captions"; t: number; on: boolean; at: number }   // t = video seconds, at = Date.now()
-export type StruggleKind = "pause" | "rewind" | "replay" | "captions" | "slowdown"
-export type Struggle = { kind: StruggleKind; t: number; weight: number }
 export type Explanation = { summary: string; audioUrl: string | null;
-  lines: { segmentId: number; original: string; translation: string; notes: string[] }[] }
+  lines: { segmentId: number; original: string; translation: string; notes: string[] }[];
+  offline?: boolean }
 export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number }
 ```
 
@@ -124,10 +151,11 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 | Route | Request | Response |
 |---|---|---|
 | `/ext/ping` | `{}` | `{ ok: true }` (Task 0 smoke test) |
-| `/ext/session` | `{ videoId, title }` | `{ status: "processing" \| "ready", segments: Segment[] \| null, hasDialogue: boolean }`. Starts ingest on the first call; the extension polls every 5 s. |
-| `/ext/struggle` | `{ videoId, kind, t, weight }` | `{ ok: true }` |
-| `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[], recentStruggles: Struggle[] }` | `Explanation` |
-| `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec }` | `ShadowResult` |
+| `/ext/session` | `{ videoId, title }` | `{ status: "processing" \| "ready" \| "failed", segments: Segment[] \| null, hasDialogue: boolean }`. Starts ingest on the first call; the extension polls every 5 s. |
+| `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. |
+| `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
+
+Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, and `submitShadow` (action), which uses the same scoring as `/ext/shadow`.
 
 **Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com.
 
@@ -150,10 +178,12 @@ extension/
                          host_permissions http://localhost:3001/*
   src/content.ts         wires the modules below to the page
   src/captions.ts        MutationObserver on .ytp-caption-window-container → CaptionLine buffer
-  src/signals.ts         <video> + CC-button listeners → PlayerEvent[]
+  src/signals.ts         pause/play listeners (ads ignored)
+  src/messages.ts        content ↔ background protocol, api() + mediaUrl() → blob: URL
+  src/recorder.ts        hold-to-record MediaRecorder (webm → base64)
   src/overlay.ts         shadow-DOM bubble, mascot, chips, buttons over #movie_player
   src/background.ts      all fetches to the Wasp server; returns JSON or blob URLs
-  src/shared/            types.ts, config.ts, struggle.ts (+ struggle.test.ts), window.ts (+ window.test.ts)
+  src/shared/            types.ts, config.ts, window.ts (+ window.test.ts)
   build: npm run build   (esbuild src/content.ts src/background.ts --bundle --outdir=dist)
 wasp-app/
   main.wasp              auth (usernameAndPassword), /deck + /practice pages, api ext* routes (auth: false), server.setupFn
@@ -162,7 +192,12 @@ wasp-app/
   src/server/ping.ts     /ext/ping                              (Task 0)
   src/server/eleven.ts   transcribe(), isolate(), speak()
   src/server/ingest.ts   /ext/session + background ingest       (Task 1)
-  src/server/moments.ts  /ext/struggle                          (Task 2b)
+  src/server/moments.ts  recordPause() → Moment rows
+  src/server/videos.ts   getVideo(), translations.json per video
+  src/server/paths.ts    DATA_DIR (wasp-app/data), demo-cache path
+  src/server/deck.ts     getDeck query + submitShadow action      (Task 7)
+  src/server/seed.ts     wasp db seed: demo-cache/ → data/ + Video rows (Task 8)
+  scripts/export-demo-cache.mjs   npm run cache:export -- <ids>   (Task 8)
   src/server/explain.ts  /ext/explain                           (Task 4)
   src/server/shadow.ts   /ext/shadow                            (Task 6)
   src/server/setup.ts    /media static route
@@ -191,31 +226,9 @@ Produces `/ext/session`, `transcribe(path, lang): Promise<Segment[]>` and `isola
 - Extension side: on page load and on YouTube's `yt-navigate-finish` event, call `/ext/session` and poll every 5 s until it's ready. Keep the segments in memory.
 - **Verify:** open the music-heavy demo video. Within ~60 s the background console logs ready with more than 5 segments whose times match the video. Reload the page and it's ready at once with no new ElevenLabs calls. With captions off, pausing still shows lines once it's ready (Review Focus 2).
 
-### Task 2: Struggle detection (C writes 2a, B writes 2b)
+### Task 2: Struggle detection: REMOVED
 
-Produces `detectStruggles(events: PlayerEvent[]): Struggle[]` in `src/shared/struggle.ts`.
-
-Rules and weights:
-- **pause:** any pause · 1
-- **rewind:** a seek where `from - t` is between 2 and 30 s · 2
-- **replay:** a second rewind that lands within 5 s of an earlier one, within 60 s of wall time · 3
-- **captions:** captions turned on · 1
-- **slowdown:** playback rate set below 1 · 1
-
-**2a.** Write `struggle.test.ts`:
-- `[{type:"seek",from:40,t:35,at:0}]` → one rewind at `t: 35` with weight 2
-- `[{type:"seek",from:40,t:70,at:0}]` → `[]` (a forward seek)
-- `[{type:"seek",from:100,t:50,at:0}]` → `[]` (a jump of more than 30 s is navigation)
-- Two rewinds to `t: 35` and `t: 36`, at `at: 0` and `at: 20000` → kinds `["rewind", "replay"]`
-- `[{type:"rate",t:10,value:0.75,at:0}]` → slowdown, and `value: 1.5` → `[]`
-
-Run the test and watch it fail, implement, then watch it pass. Commit.
-
-**2b.** `signals.ts`:
-- Push PlayerEvents from the `<video>` events (pause, play, seeking/seeked with the time before the seek, ratechange) and from a MutationObserver on the CC button's `aria-pressed`.
-- On each event, run `detectStruggles` on the last 2 minutes of events. Send each new struggle to `/ext/struggle` with the segment under t.
-- Show a "flagged" chip on the player for 2 s.
-- **Verify:** rewind a line twice and you see two chips (rewind, then replay), and two Moment rows exist.
+Dropped by team decision: pause is the only signal. See "Scope decision" at the top.
 
 ### Task 3: Overlay and pause flow (B)
 
@@ -229,7 +242,7 @@ Consumes `window(segments, t, span = 15): Segment[]` from `src/shared/window.ts`
 Watch it fail, implement, watch it pass. Commit.
 
 - `captions.ts`: when a new caption line appears, record `{ text, start: currentTime }` and close the previous line's end. Keep the last 3 minutes.
-- `overlay.ts`: on pause, draw the bubble over the bottom-right of the player in a shadow root (so YouTube's CSS can't break it), showing "thinking…". Call `/ext/explain` with the current caption lines and recent struggles. Render the lines with their translations, notes on hover, and the "Hear it clearly" and "Shadow this line" buttons. Remove the bubble on play.
+- `overlay.ts`: on pause, draw the bubble over the bottom-right of the player in a shadow root (so YouTube's CSS can't break it), showing "thinking…". Call `/ext/explain` with the current caption lines. Render the lines with their translations, notes on hover, and the "Hear it clearly" and "Shadow this line" buttons. Remove the bubble on play.
 - **Verify:** pause at 3 spots on the demo video and the bubble shows the right lines each time, then disappears on play.
 
 ### Task 4: Explanation and voice (C)
@@ -237,9 +250,9 @@ Watch it fail, implement, watch it pass. Commit.
 Produces `/ext/explain`.
 
 - Lines come from `window()` over the Scribe segments, or from `captionLines` while the video is still processing. With no lines, return `{ summary: "Nothing's been said yet. Play a bit more!", audioUrl: null, lines: [] }` (Review Focus 1). Record a pause Moment.
-- Call Claude with this system prompt: *"You are a friendly {LANGUAGE} tutor watching a video with a learner. For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. If the learner's recent struggles show they rewound or replayed a line, focus on that line. Then write a spoken summary of at most 2 sentences. Reply only with JSON matching the Explanation type."* Retry once on invalid JSON, then fall back to the lines with no notes.
+- Call Claude with this system prompt: *"You are a friendly {LANGUAGE} tutor watching a video with a learner. For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. Then write a spoken summary of at most 2 sentences. Reply only with JSON matching the Explanation type."* Retry once on invalid JSON, then fall back to the lines with no notes.
 - `speak(summary)` → `explain-{Math.round(t)}.mp3`. The overlay plays it through a blob URL and the mascot bounces while it plays.
-- **Verify:** pause, and the voice starts within 5 s on venue Wi-Fi. After a rewind, the explanation mentions the rewound line.
+- **Verify:** pause, and the voice starts within 5 s on venue Wi-Fi.
 
 ### Task 5: "Hear it clearly" (C)
 
@@ -266,7 +279,7 @@ Watch it fail, then implement: `normalize` lowercases, applies NFD and strips th
 - `getDeck` (Wasp query): group the demo user's Moments by `(videoId, segmentId)` and sum the weights. Join the segment text, the video title and the best ShadowAttempt accuracy. Sort by total weight, highest first.
 - `/deck`: one card per line, showing the line, the video title, chips for why it was flagged ("rewound 2×, paused"), and the best score or "not practised". Clicking a card opens `youtube.com/watch?v={id}&t={start-1}`.
 - `/practice`: steps through the top 5 cards. For each, play the dialogue clip, show the translation, record a shadowing attempt in the page (same score logic through a Wasp action) and move to the next card.
-- **Verify:** after the demo flow, `/deck` lists the flagged lines in struggle order, and practising one updates its score.
+- **Verify:** after the demo flow, `/deck` lists the lines you paused on, most-paused first, and practising one updates its score.
 
 ### Task 8: Make the demo unbreakable (A + C, 1:50–2:10)
 
@@ -292,13 +305,7 @@ Watch it fail, then implement: `normalize` lowercases, applies NFD and strips th
 
 ## 3-minute demo script
 
-- **(0:00) Hook:** "Learners turn shows into study material by hand. We made a coworker that does it while you watch." Open a Spanish YouTube video. The extension is already listening.
-- **(0:25)** Miss a fast line and rewind it twice. A "flagged" chip appears both times, unprompted.
-- **(0:45)** Pause. The mascot appears over the video and explains that line out loud, mentioning that you rewound it.
-- **(1:20)** Click "Hear it clearly". The music drops out and the line plays slowed down.
-- **(1:45)** Shadow it: say the line and the coloured diff appears.
-- **(2:10)** Open `/deck`. Every moment you struggled with, ranked, with the reason it was flagged. Click Practice.
-- **(2:40) Close:** "You just watch. It builds the program. Next: Netflix and role-play with the characters." Then the tool list: ElevenLabs, Wasp.
+See [DEMO.md](DEMO.md) for the pause-only script, per-step checks, offline rehearsal and troubleshooting.
 
 ## Likely Q&A
 

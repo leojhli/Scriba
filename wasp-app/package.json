@@ -2,7 +2,8 @@
   "name": "wasp-app",
   "type": "module",
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "cache:export": "node scripts/export-demo-cache.mjs"
   },
   "workspaces": [
     ".wasp/out/*",
