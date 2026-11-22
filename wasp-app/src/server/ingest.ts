@@ -41,8 +41,8 @@ export const extSession: ExtSession = async (req, res) => {
     });
     video = await getVideo(videoId);
     void startIngest(videoId);
-  } else if (video.status === "failed" && !running.has(videoId)) {
-    // A page reload retries a failed ingest (e.g. after keys were added).
+  } else if (video.status !== "ready" && !running.has(videoId)) {
+    // Retry a failed ingest (e.g. after keys were added) or one orphaned by a server restart.
     await prisma.video.update({ where: { id: videoId }, data: { status: "processing" } });
     video = { ...video, status: "processing" };
     void startIngest(videoId);
