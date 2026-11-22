@@ -33,6 +33,17 @@ Not verified: shadowing with a real microphone (needs a human), and the /practic
 
 **Demo Chrome window:** Chrome 157 ignores `--load-extension`, so the demo profile (`.chrome-demo-profile/`, gitignored) is launched with `--enable-unsafe-extension-debugging --remote-debugging-port=9333`, and the extension is loaded via the CDP call `Extensions.loadUnpacked`. Or just use "Load unpacked" in normal Chrome.
 
+## Ingest speed (measured 2026-11-22)
+
+Opening a new video to "Ready" went from ~60–70 s to **~14 s on the server, ~16 s in the browser**. Despacito as a sample: download 10.9 s, audio 0.1 s, Scribe 2.7 s; the dialogue track arrives ~3 s later.
+- **Download:** yt-dlp zipapp instead of the one-file build (saves ~17 s).
+- **Audio:** the AAC track is copied out of the mp4 into `audio.m4a` (0.1 s, instead of 3.8 s re-encoding to mp3). Scribe and Voice Isolator both accept m4a. Older videos still have `audio.mp3`; `DeckCard.audioFile` picks the right one.
+- **Ready after the transcript:** the video is marked ready as soon as Scribe finishes. Voice Isolator runs in parallel and flips `hasDialogue` when done. The extension polls every 2 s while processing, then every 3 s until `hasDialogue`.
+- Measured: Scribe takes 1.8 s for 3 min of audio, and Voice Isolator 1.5 s for 45 s. The remaining time is mostly YouTube download and extraction.
+- **Not done (alternatives):**
+  - Use YouTube's own captions for an instant transcript of the whole video (4.4 s). This weakens the ElevenLabs story.
+  - Process longer than 3 minutes. Voice isolation costs ~1k ElevenLabs characters per minute.
+
 ## Explain latency (measured 2026-11-22)
 
 The server logs `[explain] <id>@<t>s claude=…ms tts=…ms total=…ms` for every pause.
@@ -78,7 +89,7 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
   - Node 22 in `~/.local/node`. npm is v11, because npm 10 crashes with "edgesOut" during `wasp compile`.
   - Wasp 0.22 via `npm i -g @wasp.sh/wasp-cli`, not the old installer script.
   - Static ffmpeg 6.0 at `~/.local/bin/ffmpeg`.
-  - yt-dlp 2026.10.26 at `~/.local/bin/yt-dlp`. The old `/usr/local/bin/yt-dlp` (2025.06) fails on YouTube with "The page needs to be reloaded". YouTube now needs a JS runtime, so ingest passes `--js-runtimes node:<server's node>`.
+  - yt-dlp 2026.10.26. `~/.local/bin/yt-dlp` is a wrapper that runs the **Python zipapp** (`~/.local/share/yt-dlp/yt-dlp.zipapp`), which starts in ~1 s. The macOS one-file build (kept as `yt-dlp-onefile`) spends ~17 s unpacking itself on every run. The old `/usr/local/bin/yt-dlp` (2025.06) fails on YouTube with "The page needs to be reloaded". YouTube now needs a JS runtime, so ingest passes `--js-runtimes node:<server's node>`.
   - The server auto-detects both binaries; override with `FFMPEG_PATH` / `YTDLP_PATH`.
 - **Run the backend:** `cd wasp-app && cp .env.server.example .env.server` (fill in the keys), then `wasp db migrate-dev`, then `wasp start`. The server runs on `localhost:3001` and the client on `localhost:3000`.
 - **Build the extension:** `cd extension && npm i && npm run build` (or `npm run watch`). Load it unpacked from `extension/` at `chrome://extensions`, and reload it after each build.

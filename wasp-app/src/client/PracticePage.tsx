@@ -41,8 +41,7 @@ export function PracticePage() {
 
   const play = () => {
     audio.current?.pause();
-    const file = card.hasDialogue ? "dialogue.mp3" : "audio.mp3";
-    const a = new Audio(`${config.apiUrl}/media/${card.videoId}/${file}`);
+    const a = new Audio(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`);
     audio.current = a;
     a.preservesPitch = true;
     a.addEventListener(

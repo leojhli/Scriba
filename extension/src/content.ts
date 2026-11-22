@@ -3,7 +3,7 @@ import { CaptionBuffer } from "./captions";
 import { api, mediaUrl } from "./messages";
 import { Overlay, type Line } from "./overlay";
 import { Recorder } from "./recorder";
-import { HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config";
+import { DIALOGUE_POLL_MS, HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config";
 import type { Explanation, Segment, ShadowResult } from "./shared/types";
 import { window as segWindow } from "./shared/window";
 import { isAdShowing, watchAds, watchPlayback } from "./signals";
@@ -15,6 +15,8 @@ const log = (...a: unknown[]) => console.log("%c[Pause&Effect]", "color:#ff7a59;
 let videoId: string | null = null;
 let session: Session | null = null;
 let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let announcedReady = false;
+let dialoguePolls = 0;
 let pauseTimer: ReturnType<typeof setTimeout> | undefined;
 let explainSeq = 0;
 let speech: HTMLAudioElement | null = null;
@@ -46,6 +48,8 @@ function onNavigate(): void {
   videoId = id;
   session = null;
   clearTimeout(pollTimer);
+  announcedReady = false;
+  dialoguePolls = 0;
   captions.reset();
   overlay.status(null);
   overlay.hideBubble();
@@ -63,8 +67,14 @@ async function pollSession(id: string): Promise<void> {
     session = res.data;
     overlay.offline(!!res.offline);
     if (session.status === "ready") {
-      log(`ready: ${session.segments?.length ?? 0} segments, dialogue=${session.hasDialogue}`, session.segments);
-      overlay.status("Ready · pause anytime", "ok", 4000);
+      if (!announcedReady) {
+        announcedReady = true;
+        log(`ready: ${session.segments?.length ?? 0} segments, dialogue=${session.hasDialogue}`, session.segments);
+        overlay.status("Ready · pause anytime", "ok", 4000);
+      }
+      // The voice-isolated track ("Hear it clearly") lands a few seconds after the transcript.
+      if (!session.hasDialogue && dialoguePolls++ < 20) pollTimer = setTimeout(() => pollSession(id), DIALOGUE_POLL_MS);
+      else if (session.hasDialogue && dialoguePolls > 0) log("dialogue track ready");
       return;
     }
     if (session.status === "failed") {

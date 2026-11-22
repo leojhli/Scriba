@@ -56,7 +56,7 @@ async function startIngest(videoId: string): Promise<void> {
   const t0 = Date.now();
   try {
     await ingest(videoId);
-    console.log(`[ingest] ${videoId} ready in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    console.log(`[ingest] ${videoId} done in ${((Date.now() - t0) / 1000).toFixed(1)} s`);
   } catch (e) {
     console.error(`[ingest] ${videoId} failed`, e);
     await prisma.video.update({ where: { id: videoId }, data: { status: "failed" } }).catch(() => {});
@@ -65,14 +65,28 @@ async function startIngest(videoId: string): Promise<void> {
   }
 }
 
-/** yt-dlp (first 3 min) → ffmpeg audio.mp3 → Scribe + Voice Isolator in parallel → ready. */
+/**
+ * yt-dlp (first 3 min) → audio track → Scribe → ready. Voice Isolator runs alongside and
+ * flips hasDialogue when it finishes, so pausing works as soon as the transcript exists.
+ */
 export async function ingest(videoId: string): Promise<void> {
   const dir = videoDir(videoId);
   const ffmpeg = ffmpegPath();
+  const t0 = Date.now();
+  const lap = (() => {
+    let last = t0;
+    return () => {
+      const now = Date.now();
+      const ms = now - last;
+      last = now;
+      return `${(ms / 1000).toFixed(1)}s`;
+    };
+  })();
 
   // A fresh ingest renumbers the lines, so drop anything keyed by the old line ids.
   for (const f of fs.readdirSync(dir))
-    if (f.startsWith("source.") || f.startsWith("explain-") || f === "translations.json") fs.rmSync(path.join(dir, f));
+    if (f.startsWith("source.") || f.startsWith("explain-") || f === "translations.json" || f === "audio.mp3")
+      fs.rmSync(path.join(dir, f));
   const { stdout } = await run(
     YTDLP,
     [
@@ -100,26 +114,35 @@ export async function ingest(videoId: string): Promise<void> {
   );
   const source = fs.readdirSync(dir).find((f) => f.startsWith("source."));
   if (!source) throw new Error("yt-dlp produced no file");
+  const tDownload = lap();
 
-  const audio = path.join(dir, "audio.mp3");
-  await run(ffmpeg, ["-y", "-loglevel", "error", "-i", path.join(dir, source), "-vn", "-ac", "1", "-ar", "44100", "-b:a", "128k", audio], {
-    timeout: 120_000,
-  });
+  // Copy the AAC track out of the mp4 (instant); only re-encode if the source isn't AAC.
+  const audio = path.join(dir, "audio.m4a");
+  const copy = /\.(mp4|m4a)$/.test(source) ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "128k"];
+  await run(ffmpeg, ["-y", "-loglevel", "error", "-i", path.join(dir, source), "-vn", ...copy, audio], { timeout: 120_000 });
+  const tAudio = lap();
 
-  const [{ segments, language }, dialogue] = await Promise.all([
-    transcribe(audio), // language auto-detected per video
-    isolate(audio, path.join(dir, "dialogue.mp3")),
-  ]);
+  const isolating = isolate(audio, path.join(dir, "dialogue.mp3"));
+  const { segments, language } = await transcribe(audio); // language auto-detected per video
+  const tScribe = lap();
 
   const title = stdout.trim().split("\n").pop()?.trim();
-  const data = {
-    status: "ready",
-    hasDialogue: dialogue !== null,
-    segments: JSON.stringify(segments),
-    ...(title ? { title } : {}),
-  };
-  const v = await prisma.video.update({ where: { id: videoId }, data });
+  const v = await prisma.video.update({
+    where: { id: videoId },
+    data: { status: "ready", hasDialogue: false, segments: JSON.stringify(segments), ...(title ? { title } : {}) },
+  });
   // Snapshot for demo-cache/ (Task 8): copy data/{id} there and `wasp db seed` reloads it.
-  writeJson(path.join(dir, "video.json"), { id: v.id, title: v.title, language, hasDialogue: v.hasDialogue, segments });
-  console.log(`[ingest] ${videoId}: ${segments.length} segments, language=${language}, dialogue=${data.hasDialogue}`);
+  const snapshot = (hasDialogue: boolean) =>
+    writeJson(path.join(dir, "video.json"), { id: v.id, title: v.title, language, hasDialogue, segments });
+  snapshot(false);
+  console.log(
+    `[ingest] ${videoId} READY in ${((Date.now() - t0) / 1000).toFixed(1)}s (download ${tDownload}, audio ${tAudio}, scribe ${tScribe}): ${segments.length} segments, language=${language}`,
+  );
+
+  const dialogue = await isolating;
+  if (dialogue) {
+    await prisma.video.update({ where: { id: videoId }, data: { hasDialogue: true } });
+    snapshot(true);
+  }
+  console.log(`[ingest] ${videoId} dialogue=${dialogue !== null} after ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }

@@ -1,7 +1,10 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { GetDeck, SubmitShadow } from "wasp/server/operations";
 import type { ShadowResult } from "../shared/types";
 import { getDemoUserId } from "./demoUser";
 import { scoreAttempt, type ShadowInput } from "./shadow";
+import { DATA_DIR } from "./paths";
 import { getVideo, readTranslations } from "./videos";
 
 export type DeckCard = {
@@ -16,6 +19,8 @@ export type DeckCard = {
   pauses: number;
   bestAccuracy: number | null;
   hasDialogue: boolean;
+  /** Audio for /practice: the dialogue track, else the plain audio track. */
+  audioFile: string;
 };
 
 /** The demo user's pauses grouped by line, ranked by how often they paused there. */
@@ -54,6 +59,11 @@ export const getDeck: GetDeck<void, DeckCard[]> = async (_args, context) => {
       pauses: g.pauses,
       bestAccuracy: best,
       hasDialogue: video.hasDialogue,
+      audioFile: video.hasDialogue
+        ? "dialogue.mp3"
+        : fs.existsSync(path.join(DATA_DIR, g.videoId, "audio.m4a"))
+          ? "audio.m4a"
+          : "audio.mp3",
     });
   }
   const last = new Map([...groups.values()].map((g) => [`${g.videoId}:${g.segmentId}`, g.last]));

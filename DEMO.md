@@ -23,7 +23,7 @@
    cd ~/yc-elevenlabs/extension && npm i && npm run build
    ```
    Open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and pick the `extension/` folder. After any rebuild, click the reload icon on the card, then refresh the YouTube tab.
-4. **Pick the demo video.** Any language works, ideally with music under the dialogue so "Hear it clearly" has something to remove. Open it once about 2 minutes before you demo so the first 3 minutes get processed. These are already processed and ready:
+4. **Pick the demo video.** Any language works, ideally with music under the dialogue so "Hear it clearly" has something to remove. Open it once before you demo; processing takes about 15 s. These are already processed and ready:
    - Spanish: Brad Pitt sled-dog clip, `aUGOFL0Ygsw` (pause at ~1:41)
    - Mandarin: Street Talk interview, `YCIFNPMu0hs` (pause at ~0:25, after "请问你今年芳龄？")
    - Mandarin songs, great for Hear it clearly: 周興哲 `wSBXfzgqHtE`, Jay Chou 告白氣球 `bu7nU9Mhpyo`
@@ -43,7 +43,7 @@
 ## 1b. Demo with any video (or a judge's pick)
 
 1. Paste the YouTube link into the demo Chrome window.
-2. A chip in the top-left says **"Listening to the first 3 minutes…"** for about 60–70 s, then **"Ready · pause anytime"**.
+2. A chip in the top-left says **"Listening to the first 3 minutes…"** for about 15 s, then **"Ready · pause anytime"**. "Hear it clearly" becomes available a few seconds later.
 3. Pause anywhere in the first 3 minutes for the full experience: voice, Hear it clearly, shadowing, and the line goes to your deck.
 4. After 3:00, turn on **CC**: the panel explains from YouTube's own captions instead. You won't get "Hear it clearly" there, and those lines aren't added to the deck.
 5. **Any language:** it's auto-detected per video. Translations and the spoken summary are in English. Chinese notes include pinyin and Japanese notes include romaji. Shadowing scores Chinese and Japanese per character.

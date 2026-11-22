@@ -14,6 +14,7 @@ export const SHADOW_TIMEOUT_MS = 15000;
 export const EXPLAIN_TIMEOUT_MS = 15000;
 export const MEDIA_TIMEOUT_MS = 15000;
 
-export const SESSION_POLL_MS = 5000;
+export const SESSION_POLL_MS = 2000; // localhost, cheap: notice "ready" quickly
+export const DIALOGUE_POLL_MS = 3000; // after ready, until the isolated dialogue track exists
 export const CAPTION_KEEP_S = 3 * 60;
 export const HEAR_IT_RATE = 0.75;
