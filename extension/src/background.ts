@@ -43,7 +43,8 @@ async function nearestExplain(body: ExplainBody): Promise<Explanation | null> {
   let best: { d: number; e: Explanation } | null = null;
   for (const [k, e] of Object.entries(cache)) {
     const d = Math.abs(Number(k) - body.t);
-    if (d <= 30 && (!best || d < best.d)) best = { d, e };
+    // Same moment only: the voice explains the line just said, so a cache from 30 s away would be wrong.
+    if (d <= 3 && (!best || d < best.d)) best = { d, e };
   }
   return best?.e ?? null;
 }

@@ -26,3 +26,11 @@ const TOKEN = new RegExp(`[${CJK}]|(?:(?![${CJK}])[\\p{L}\\p{N}])+`, "gu");
 export function tokenize(s: string): string[] {
   return s.toLowerCase().normalize("NFD").replace(/\p{M}+/gu, "").match(TOKEN) ?? [];
 }
+
+// Pinyin/romaji in parentheses, e.g. "等 (děng)": fine on screen, odd when read aloud.
+const SPOKEN_ROMANIZATION = /\s*[（(][^)）]*[āáǎàēéěèīíǐìōóǒòūúǔùǖǘǚǜ][^)）]*[)）]/g;
+
+/** What the mascot actually says: the summary without romanization in parentheses. */
+export function spokenText(summary: string): string {
+  return summary.replace(SPOKEN_ROMANIZATION, "").replace(/\s+([,.;:!?])/g, "$1").trim();
+}

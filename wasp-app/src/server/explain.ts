@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ExtExplain } from "wasp/server/api";
+import { spokenText } from "../shared/text";
 import type { Explanation } from "../shared/types";
 import { window as segWindow } from "../shared/window";
 import { checkDemoKey } from "./demoKey";
@@ -15,22 +16,26 @@ const CLAUDE_TIMEOUT_MS = 10_000; // ~4 s typical for 3 lines; TTS adds ~1 s (ex
 const MAX_LINES = 3; // the last few lines keep it fast and focused
 const PROCESSED_S = 180; // ingest downloads "*0:00-3:00"
 
-const SYSTEM = `You are a friendly language tutor watching a video with a learner who is studying the language spoken in it (any language; detect it from the lines). For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. For Chinese include pinyin for key words, for Japanese include romaji. Then write a spoken summary in English of at most 2 sentences. Reply only with JSON matching the Explanation type.`;
+const SYSTEM = `You are a friendly language tutor sitting next to a learner who is watching a video in the language they're learning (any language; detect it from the lines). The learner just paused right after the line in "justSaid". "context" holds the lines just before it, oldest first.
+
+Reply only with JSON:
+- "lines": one entry for every line (each context line and the justSaid line), with its index, a natural English translation, and short notes: 1–2 for the justSaid line (idioms, slang, grammar, or why it is said that way) and at most 1 for each context line. For Chinese include pinyin for key words; for Japanese include romaji.
+- "summary": what you say out loud. 1–2 short spoken sentences (30 words at most) in English about the justSaid line only: what it means and the single most useful thing to know about it (a word, an idiom, a grammar point or the tone). Do not recap the scene, the story or the song, and do not open with "In this clip" or "Here". Talk to the learner directly, like a friend leaning over. Don't guess a speaker's gender: say "they" or use a name from the lines. You may quote one short word or phrase from the line in its original script, but never write pinyin or romaji in the summary.`;
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
   required: ["summary", "lines"],
   properties: {
-    summary: { type: "string", description: "Spoken summary, at most 2 sentences, in English." },
+    summary: { type: "string", description: "Spoken explanation of the justSaid line only: 1–2 short sentences in English." },
     lines: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["segmentId", "translation", "notes"],
+        required: ["index", "translation", "notes"],
         properties: {
-          segmentId: { type: "integer" },
+          index: { type: "integer" },
           translation: { type: "string" },
           notes: { type: "array", items: { type: "string" } },
         },
@@ -40,7 +45,7 @@ const SCHEMA = {
 } as const;
 
 type Line = { segmentId: number; text: string; start: number; end: number };
-type ClaudeOut = { summary: string; lines: { segmentId: number; translation: string; notes: string[] }[] };
+type ClaudeOut = { summary: string; lines: { index: number; translation: string; notes: string[] }[] };
 
 let anthropic: Anthropic | null = null;
 function claude(): Anthropic {
@@ -48,11 +53,14 @@ function claude(): Anthropic {
   return (anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS }));
 }
 
+/** The last line is the one the learner paused on; the voice explains only that one. */
 async function askClaude(lines: Line[], title: string, language: string | null): Promise<ClaudeOut> {
+  const last = lines.length - 1;
   const user = JSON.stringify({
     video: title,
     ...(language ? { language } : {}),
-    lines: lines.map((l) => ({ segmentId: l.segmentId, text: l.text })),
+    context: lines.slice(0, last).map((l, index) => ({ index, text: l.text })),
+    justSaid: { index: last, text: lines[last].text },
   });
   for (let attempt = 0; attempt < 2; attempt++) {
     const msg = await claude().beta.messages.create({
@@ -80,14 +88,12 @@ async function askClaude(lines: Line[], title: string, language: string | null):
 type Cache = Record<string, Explanation>;
 const cacheFile = (videoId: string) => path.join(videoDir(videoId), "explain-cache.json");
 
-function nearestCached(videoId: string, t: number): Explanation | null {
+/** A cached explanation of the same just-said line (the voice talks about that line only). */
+function cachedFor(videoId: string, lines: Line[]): Explanation | null {
+  const just = lines[lines.length - 1];
+  if (just.segmentId < 0) return null;
   const cache = readJson<Cache>(cacheFile(videoId), {});
-  let best: { d: number; e: Explanation } | null = null;
-  for (const [k, e] of Object.entries(cache)) {
-    const d = Math.abs(Number(k) - t);
-    if (d <= 30 && (!best || d < best.d)) best = { d, e };
-  }
-  return best?.e ?? null;
+  return Object.values(cache).find((e) => e.lines[e.lines.length - 1]?.segmentId === just.segmentId) ?? null;
 }
 
 /** POST /ext/explain { videoId, t, captionLines } → Explanation */
@@ -118,12 +124,15 @@ export const extExplain: ExtExplain = async (req, res) => {
 
   if (!lines.length) {
     const processing = !video || video.status === "processing";
+    const saidEarlier = (video?.segments ?? []).some((s) => s.start <= t) || captionLines.some((c) => c.start <= t);
     const summary =
       processing && !captionLines.length
         ? "Still listening… give me a few seconds."
         : t > PROCESSED_S
           ? "I transcribed the first 3 minutes. Past that I read YouTube's captions, so turn on CC and play a little."
-          : "Nothing's been said yet. Play a bit more!";
+          : saidEarlier
+            ? "Nothing was said in the last few seconds. Pause right after a line and I'll explain it."
+            : "Nothing's been said yet. Play a bit more!";
     res.json({ summary, audioUrl: null, lines: [] } satisfies Explanation);
     return;
   }
@@ -134,34 +143,38 @@ export const extExplain: ExtExplain = async (req, res) => {
   let explanation: Explanation;
   try {
     const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId));
-    const byId = new Map(out.lines.map((l) => [l.segmentId, l]));
+    const byIndex = new Map(out.lines.map((l) => [l.index, l]));
     explanation = {
       summary: out.summary,
       audioUrl: null,
       lines: lines.map((l, i) => {
-        const o = (l.segmentId >= 0 ? byId.get(l.segmentId) : undefined) ?? out.lines[i];
+        const o = byIndex.get(i) ?? out.lines[i];
         return { segmentId: l.segmentId, original: l.text, translation: o?.translation ?? "", notes: o?.notes ?? [] };
       }),
     };
   } catch (e) {
     console.error("[explain] Claude failed, using cache", e);
-    const cached = nearestCached(videoId, t);
-    res.json(
-      cached
-        ? { ...cached, offline: true }
-        : ({
-            summary: "I'm offline right now, but here are the lines.",
-            audioUrl: null,
-            offline: true,
-            lines: lines.map((l) => ({ segmentId: l.segmentId, original: l.text, translation: "", notes: [] })),
-          } satisfies Explanation),
-    );
+    const cached = cachedFor(videoId, lines);
+    if (cached) {
+      res.json({ ...cached, offline: true } satisfies Explanation);
+      return;
+    }
+    // No explanation of this exact line cached: show the lines with any translations we know.
+    const tr = readTranslations(videoId);
+    const known = lines.map((l) => ({ segmentId: l.segmentId, original: l.text, translation: tr[l.segmentId]?.translation ?? "", notes: tr[l.segmentId]?.notes ?? [] }));
+    const just = known[known.length - 1].translation;
+    res.json({
+      summary: just ? `I'm offline, but that line means: “${just}”` : "I'm offline right now, but here are the lines.",
+      audioUrl: null,
+      offline: true,
+      lines: known,
+    } satisfies Explanation);
     return;
   }
 
   try {
     const file = `explain-${key}.mp3`;
-    await speak(explanation.summary, path.join(videoDir(videoId), file));
+    await speak(spokenText(explanation.summary), path.join(videoDir(videoId), file));
     explanation.audioUrl = `/media/${videoId}/${file}`;
   } catch (e) {
     console.error("[explain] TTS failed", e);
