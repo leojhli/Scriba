@@ -1,4 +1,6 @@
-# Pause & Effect — CLAUDE.md
+# Scriba (formerly Pause & Effect) — CLAUDE.md
+
+**Renamed 2026-11-22:** the extension is now **Scriba**, and its mascot is **Scriba Inu** (`scriba inu.PNG`, a shiba with a scroll in its mouth; cropped to `extension/assets/scriba-inu.png` plus 16/32/48/128 icons). Internal ids (`DEMO_KEY`, `dataset.pauseEffect`, the Wasp app name) are unchanged.
 
 **Pitch:** "You just watch. It builds your study program."
 
@@ -79,6 +81,16 @@ The voice explains **the line just said, at that moment in the video**: what it 
 **Cost:** romanization and context made Claude ~1.5 s slower (4.9–5.8 s), so a pause now takes ~5.5–7 s in total. Streaming the summary first (option 1 or 2 under "Explain latency") would win that back.
 
 **Voice speed:** the pill next to the × in the panel header cycles 0.75× → 1× → 1.25× → 1.5× → 2× (`extension/src/voiceRate.ts`). It applies at once, even mid-sentence, with pitch preserved, and is saved in `chrome.storage.local`, so it carries over to every video and tab. Each tab tags its own writes so a late storage echo can't undo a newer click.
+
+## Scriba UI (decided 2026-11-22)
+
+On pause, a **right-hand sidebar drawn as an unrolled paper scroll** slides in over the video (`extension/src/overlay.ts`). The user asked for: right sidebar, translucent, minimal, sketched rather than solid, and the text box like a scroll.
+- **The scroll:** rolled ends top and bottom with spiral tips, a red ribbon bookmark (the ribbon on Scriba's scroll), a translucent frosted sheet with pencil-sketch edges (uneven border radii plus a faint second stroke), handwritten labels (Chalkboard SE), and a wavy hand-drawn divider.
+- **Contents, top to bottom:** Scriba + "paused at m:ss" + the voice-speed pill + ×; Scriba (animated: bobs, tilts while thinking, bounces while talking) with the spoken note, clamped to 5 lines (3 on small players; click to expand); "Just said": the line, romanization, translation, **Hear it clearly** and **Hold to shadow**, notes; the line before it (hidden on short players); **Deck** and **Practice** links to the web app, and **Keep watching**.
+- **Behaviour:** it sits inside `#movie_player` under YouTube's control bar, so the controls and fullscreen still work. Clicking the video outside the scroll resumes playback; Space/K on the scroll resumes; Esc closes without resuming. The status chips use the same sketched style.
+- **three.js paper field** (`extension/src/fx.ts`, built separately as `dist/fx.js` and `import()`ed on first open, so YouTube browsing never loads three.js): 16 hand-cut paper scraps carrying the paused line's characters (CJK) or words (Latin) drift up behind the scroll text at 50% opacity, plus faint dust. It follows the installed three.js skills: `setAnimationLoop` + `Timer`, sRGB `CanvasTexture`s without mipmaps, pixel ratio capped at 1.5, no allocations per frame, edge fade, stopped while hidden and disposed with its canvas.
+- **Toolbar button** opens the deck (`chrome.action.onClicked` in `background.ts`).
+- Superseded on the way: a full-window page, then a full-video frosted overlay. Screens of each are in git history (`a57ce75`).
 
 ## Scope decision: pause is the only signal
 

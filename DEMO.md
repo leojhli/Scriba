@@ -1,4 +1,6 @@
-# How to demo Pause & Effect
+# How to demo Scriba
+
+> The extension is now **Scriba**: pausing slides in a sketched paper-scroll sidebar with Scriba Inu, the line, its reading and translation, Hear it clearly / Hold to shadow, and links to your Deck and Practice. Click the video (or Space) to keep watching; Esc closes. The toolbar button opens the deck.
 
 **The product in one line:** you watch a YouTube video in the language you're learning. When you pause, a mascot explains the last few lines out loud, and every line you paused on becomes a card you can practise. The language is auto-detected; Spanish and Mandarin are verified end to end.
 

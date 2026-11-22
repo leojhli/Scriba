@@ -1,9 +1,9 @@
 // Scriba's UI: one shadow-DOM host over #movie_player holding
 // - chips: small status stickers in the top-left ("Ready · pause anytime");
-// - stage: the translucent overlay that opens on pause, just over the video. Scriba Inu with a
-//   speech bubble, the line you paused on, and a faint three.js paper-scrap field
-//   (fx.ts, loaded on first open). It sits under YouTube's control bar, and clicking the frosted
-//   background reaches the video like any click on the player, so it resumes playback.
+// - stage: on pause, a right-hand sidebar drawn as an unrolled paper scroll (like the one Scriba
+//   carries): a sketched, translucent sheet between two rolled ends, with Scriba's note, the line
+//   you paused on, and a faint three.js paper-scrap field behind the text (fx.ts, loaded on first
+//   open). The rest of the video stays visible, and clicking it resumes playback as usual.
 // No innerHTML anywhere: YouTube enforces Trusted Types, so the DOM (and SVG) is built by hand.
 import { WEB_URL } from "./shared/config";
 import type { Explanation, ShadowResult } from "./shared/types";
@@ -50,6 +50,25 @@ function icon(name: keyof typeof ICONS): SVGSVGElement {
   return svg;
 }
 
+/** A hand-drawn wavy rule, stretched to the width it gets. */
+function squiggle(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 300 10");
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.setAttribute("class", "rule");
+  for (const [d, o] of [
+    ["M2 6 C 40 3, 80 8, 120 5 S 200 3, 240 6 S 288 7, 298 4", ".6"],
+    ["M4 7 C 50 5, 90 9, 140 6 S 220 5, 296 6", ".25"],
+  ]) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    p.setAttribute("opacity", o);
+    p.setAttribute("vector-effect", "non-scaling-stroke");
+    svg.append(p);
+  }
+  return svg;
+}
+
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const MASCOT = () => chrome.runtime.getURL("assets/scriba-inu.png");
 const NON_LATIN = /(?!\p{Script=Latin})\p{L}/u;
@@ -69,123 +88,142 @@ const CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 .wrap { position: absolute; inset: 0; container-type: size; pointer-events: none;
-  --ink: #2b2420; --card: rgba(255,253,248,.9); --shiba: #ffa33c; --shiba-deep: #f08a1c; --ribbon: #d6533a; --muted: #6f6158;
+  --ink: #2b2420; --pencil: rgba(43,36,32,.28); --shiba: #ffa33c; --shiba-deep: #f08a1c; --ribbon: #d6533a; --muted: #6f6158;
+  --hand: "Chalkboard SE", "Chalkboard", "Comic Neue", "Hiragino Maru Gothic ProN", "PingFang SC", system-ui, sans-serif;
   --round: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "PingFang SC", "Apple SD Gothic Neo", system-ui, sans-serif;
   --text: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", sans-serif;
-  font-family: var(--text); font-size: clamp(12px, 1.45cqw, 19px); line-height: 1.45; color: var(--ink); }
+  font-family: var(--text); font-size: clamp(12px, 1.3cqw, 17px); line-height: 1.45; color: var(--ink); }
 
-/* Stage: frosted, translucent, only over the video */
-.stage { position: absolute; inset: 0; opacity: 0; visibility: hidden; transition: opacity .25s ease, visibility 0s linear .25s; }
-.stage.on { opacity: 1; visibility: visible; transition: opacity .25s ease; }
-.veil { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(255,246,234,.66), rgba(255,240,224,.52));
-  backdrop-filter: blur(7px) saturate(1.1); -webkit-backdrop-filter: blur(7px) saturate(1.1); }
-canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; }
+.stage { position: absolute; inset: 0; visibility: hidden; transition: visibility 0s linear .3s; }
+.stage.on { visibility: visible; transition: none; }
+.shade { position: absolute; inset: 0; opacity: 0; transition: opacity .3s ease;
+  background: linear-gradient(270deg, rgba(30,22,16,.34) 0%, rgba(30,22,16,.12) 38%, rgba(30,22,16,0) 62%); }
+.stage.on .shade { opacity: 1; }
 
-.top { position: absolute; top: 3.4cqh; left: 3cqw; right: 3cqw; display: flex; align-items: center; justify-content: space-between; gap: 1em; }
-.brand { display: flex; align-items: center; gap: .5em; min-width: 0; font-family: var(--round); }
-.brand img { width: 1.9em; height: auto; flex: none; }
-.when { font-family: var(--text); color: var(--muted); font-size: .82em; font-weight: 600; white-space: nowrap; }
-.tools { display: flex; align-items: center; gap: .4em; flex: none; pointer-events: auto; }
-.offline-tag { font-family: var(--round); font-size: .74em; color: var(--ribbon); }
+/* The scroll: rolled ends top and bottom, a translucent sketched sheet between them */
+.scroll { position: absolute; top: 2.6cqh; right: 2.2cqw; bottom: 11.5cqh; width: clamp(300px, 39cqw, 480px);
+  display: flex; flex-direction: column; pointer-events: auto;
+  transform: translateX(28px) rotate(.6deg); opacity: 0; transition: transform .38s cubic-bezier(.2,.9,.25,1.1), opacity .25s ease; }
+.stage.on .scroll { transform: rotate(.4deg); opacity: 1; }
+.roll { position: relative; flex: none; height: 22px; margin: 0 -8px; z-index: 2; border: 1.75px solid var(--ink);
+  border-radius: 12px 14px 11px 13px / 11px 12px 13px 12px; background: linear-gradient(180deg, #fffdf9 0%, #f3ede3 50%, #d9d0c3 100%); }
+.roll::before, .roll::after { content: ""; position: absolute; top: 50%; width: 15px; height: 15px; margin-top: -7.5px; border-radius: 50%;
+  border: 1.75px solid var(--ink); background: radial-gradient(circle, #8f867a 0 22%, #d3cbbf 28% 52%, #f8f4ee 58%); }
+.roll::before { left: -3px; } .roll::after { right: -3px; }
+.roll.bottom { transform: rotate(-.5deg); }
+.ribbon { position: absolute; top: 12px; right: 34px; width: 13px; height: 36px; background: var(--ribbon); border: 1.75px solid var(--ink);
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); z-index: 1; }
+.paper { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; overflow: hidden;
+  background: linear-gradient(90deg, rgba(240,226,204,.55), rgba(255,251,243,.0) 9%, rgba(255,251,243,0) 91%, rgba(240,226,204,.55)), rgba(255,250,240,.8);
+  backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1);
+  border-left: 1.75px solid var(--ink); border-right: 1.75px solid var(--ink); }
+.paper::before { content: ""; position: absolute; inset: 0 3px 0 -2px; border-left: 1px solid var(--pencil); border-right: 1px solid var(--pencil);
+  transform: rotate(-.35deg); pointer-events: none; }
+canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5; pointer-events: none; }
+.head, .body, .foot { position: relative; z-index: 1; }
 
-.btn { all: unset; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .4em; white-space: nowrap;
-  font-family: var(--round); font-size: .8em; padding: .42em .8em; border-radius: 999px; color: var(--ink);
-  background: rgba(255,253,248,.78); border: 1.5px solid var(--ink); transition: background .15s, transform .1s; }
-.btn:hover { background: #fff; transform: translateY(-1px); }
-.btn:active { transform: translateY(1px); }
-.btn:focus-visible { outline: 2px solid var(--shiba-deep); outline-offset: 2px; }
-.btn.primary { background: var(--shiba); }
-.btn.primary:hover { background: #ffb256; }
-.btn.icon { padding: .42em; }
-.btn.playing { background: var(--ink); color: #fff; }
-.btn.rec { background: var(--ribbon); border-color: var(--ribbon); color: #fff; animation: pulse 1.1s infinite; }
-.btn.speed { font-variant-numeric: tabular-nums; }
-.btn.speed.custom { background: #ffe7c7; }
-.btn.changed { animation: pop .3s ease-out; }
-a.btn { text-decoration: none; }
-.ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.head { display: flex; align-items: center; gap: .55em; padding: 1.15em 1.1em .35em; }
+.head img { width: 1.7em; height: auto; }
+.name { font-family: var(--hand); font-weight: 700; font-size: 1.05em; }
+.when { color: var(--muted); font-size: .8em; font-weight: 600; flex: 1; white-space: nowrap; }
+.offline-tag { font-family: var(--hand); font-size: .78em; color: var(--ribbon); }
 
-/* Scene: Scriba + bubble, then the line */
-.scene { position: absolute; top: 14cqh; bottom: 15cqh; left: 4cqw; right: 4cqw; display: grid;
-  grid-template-columns: 40% minmax(0, 1fr); gap: 4cqw; align-items: center; }
-.hero { display: flex; flex-direction: column; align-items: center; justify-content: safe center; gap: .85em; min-height: 0; max-height: 100%; }
-.bubble { pointer-events: auto; position: relative; max-width: 26em; background: var(--card); border: 1.5px solid var(--ink);
-  border-radius: 18px; box-shadow: 2px 3px 0 var(--ink); padding: .75em 1em .85em; font-size: .94em; animation: pop .4s cubic-bezier(.2,1.4,.4,1) .06s both; }
-.bubble::after { content: ""; position: absolute; left: 50%; bottom: -8.5px; width: 14px; height: 14px; background: #fffdf8;
-  border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink); transform: translateX(-50%) rotate(45deg); }
-.says { display: flex; align-items: center; gap: .5em; font-family: var(--round); font-size: .66em; letter-spacing: .12em;
-  text-transform: uppercase; color: var(--ribbon); margin-bottom: .2em; }
-.summary.muted { color: var(--muted); font-style: italic; }
-.wave { display: none; gap: 2px; align-items: center; height: .9em; }
+.body { flex: 1; min-height: 0; overflow: auto; padding: .35em 1.1em .8em; scrollbar-width: none;
+  display: flex; flex-direction: column; gap: .75em; }
+.say { display: flex; gap: .7em; align-items: flex-start; }
+.dog { flex: none; width: 3.9em; height: auto; transform-origin: 50% 92%; animation: bob 2.6s ease-in-out infinite alternate; }
+.dog.thinking { animation: tilt 1.3s ease-in-out infinite; }
+.dog.speaking { animation: talk .32s ease-in-out infinite alternate; }
+.summary { font-family: var(--hand); font-size: .93em; line-height: 1.5; padding-top: .1em; cursor: pointer;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
+.summary.full { -webkit-line-clamp: unset; }
+.summary.muted { color: var(--muted); }
+.wave { display: none; gap: 2px; align-items: center; height: .85em; margin-left: .35em; vertical-align: -1px; }
 .wave i { display: block; width: 2.5px; border-radius: 2px; background: var(--shiba-deep); animation: wave .9s ease-in-out infinite; }
 .wave i:nth-child(2) { animation-delay: .15s } .wave i:nth-child(3) { animation-delay: .3s } .wave i:nth-child(4) { animation-delay: .45s }
 .speaking-on .wave { display: inline-flex; }
 .dots { display: inline-flex; gap: 5px; margin-left: .35em; vertical-align: middle; }
-.dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--ink); animation: dot 1s ease-in-out infinite; }
+.dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink); animation: dot 1s ease-in-out infinite; }
 .dots i:nth-child(2) { animation-delay: .15s } .dots i:nth-child(3) { animation-delay: .3s }
-.dogwrap { position: relative; width: min(26cqh, 17cqw); animation: enter .5s cubic-bezier(.2,1.5,.4,1) both; }
-.dog { display: block; width: 100%; height: auto; transform-origin: 50% 92%; animation: bob 2.6s ease-in-out infinite alternate; }
-.dog.thinking { animation: tilt 1.3s ease-in-out infinite; }
-.dog.speaking { animation: talk .32s ease-in-out infinite alternate; }
-.floor { position: absolute; left: 22%; right: 22%; bottom: -3px; height: 10px; border-radius: 50%; background: rgba(43,36,32,.12); z-index: -1; }
+.rule { display: block; width: 100%; height: 10px; flex: none; fill: none; stroke: var(--ink); stroke-width: 1.5; stroke-linecap: round; }
 
-.focus { pointer-events: auto; display: flex; flex-direction: column; gap: .9em; max-height: 100%; min-height: 0; overflow: auto; scrollbar-width: none; }
-.card { flex: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 18px; box-shadow: 2px 3px 0 var(--ink);
-  padding: .85em 1.05em .95em; display: flex; flex-direction: column; gap: .3em; animation: rise .35s cubic-bezier(.2,.9,.3,1) both; }
-.tag { font-family: var(--round); font-size: .64em; letter-spacing: .14em; text-transform: uppercase; color: var(--ribbon); }
-.orig { font-family: var(--round); font-size: 1.42em; line-height: 1.3; }
+.card { display: flex; flex-direction: column; gap: .28em; animation: rise .35s cubic-bezier(.2,.9,.3,1) both; }
+.tag { align-self: flex-start; font-family: var(--hand); font-weight: 700; font-size: .78em; color: var(--ribbon);
+  background: linear-gradient(transparent 55%, rgba(255,163,60,.35) 55%); padding: 0 .15em; }
+.orig { font-family: var(--round); font-size: 1.38em; line-height: 1.3; }
 .rom { color: var(--ribbon); font-weight: 600; }
 .en { color: var(--muted); }
-.notes { list-style: none; display: flex; flex-direction: column; gap: .2em; margin-top: .25em; font-size: .86em; color: #4a3f37; }
+.notes { list-style: none; display: flex; flex-direction: column; gap: .2em; margin-top: .2em; font-size: .86em; color: #4a3f37; }
 .notes li { position: relative; padding-left: 1em; }
-.notes li::before { content: ""; position: absolute; left: .1em; top: .62em; width: .36em; height: .36em; border-radius: 50%; background: var(--shiba); }
-.actions { display: flex; gap: .45em; flex-wrap: wrap; margin-top: .45em; }
-.earlier { display: flex; flex-direction: column; gap: .55em; padding: 0 .4em; animation: rise .35s cubic-bezier(.2,.9,.3,1) .08s both; }
-.prev { font-size: .88em; padding-left: .8em; border-left: 2px solid rgba(43,36,32,.25); }
+.notes li::before { content: "~"; position: absolute; left: 0; top: -.05em; color: var(--shiba-deep); font-family: var(--hand); font-weight: 700; }
+.actions { display: flex; gap: .5em; flex-wrap: wrap; margin: .45em 0 .15em; }
+.prev { font-size: .86em; padding-left: .75em; border-left: 1.5px dashed var(--pencil); animation: rise .35s cubic-bezier(.2,.9,.3,1) .08s both; }
 .prev .o { font-family: var(--round); }
 .prev .r { color: var(--ribbon); font-size: .92em; }
 .prev .t { color: var(--muted); font-size: .92em; }
-.skel { flex: none; background: var(--card); border: 1.5px solid var(--ink); border-radius: 18px; padding: 1em; display: flex; flex-direction: column; gap: .6em; }
-.sk { height: .9em; border-radius: 7px; background: linear-gradient(90deg, #f2e4cf, #fbf2e4, #f2e4cf); background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
+.sk { height: .85em; border-radius: 6px; background: linear-gradient(90deg, rgba(222,206,182,.5), rgba(245,236,222,.7), rgba(222,206,182,.5));
+  background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 .sk.w80 { width: 80% } .sk.w60 { width: 60% } .sk.w40 { width: 40% }
+.skel { display: flex; flex-direction: column; gap: .6em; padding-top: .2em; }
+
+/* Sketched buttons: uneven pencil outline with a faint second stroke */
+.btn { all: unset; position: relative; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .4em; white-space: nowrap;
+  font-family: var(--hand); font-weight: 700; font-size: .8em; padding: .38em .8em; color: var(--ink); background: rgba(255,252,246,.55);
+  border: 1.6px solid var(--ink); border-radius: 16px 20px 15px 22px / 20px 15px 22px 16px; transition: background .15s, transform .1s; }
+.btn::after { content: ""; position: absolute; inset: -3px -2px -2px -3px; border: 1px solid var(--pencil);
+  border-radius: 20px 14px 22px 15px / 15px 22px 14px 20px; pointer-events: none; }
+.btn:hover { background: rgba(255,255,255,.9); transform: rotate(-1deg); }
+.btn:active { transform: translateY(1px); }
+.btn:focus-visible { outline: 2px dashed var(--shiba-deep); outline-offset: 3px; }
+.btn.primary { background: rgba(255,163,60,.6); }
+.btn.primary:hover { background: rgba(255,163,60,.8); }
+.btn.icon { padding: .38em; }
+.btn.playing { background: var(--ink); color: #fff; }
+.btn.rec { background: rgba(214,83,58,.85); color: #fff; animation: pulse 1.1s infinite; }
+.btn.speed { font-variant-numeric: tabular-nums; }
+.btn.speed.custom { background: rgba(255,163,60,.3); }
+.btn.changed { animation: pop .3s ease-out; }
+a.btn { text-decoration: none; }
+.ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+
+.foot { display: flex; align-items: center; gap: .5em; padding: .55em 1.1em 1em; }
+.foot .grow { flex: 1; }
 
 /* Shadowing result */
 .result:empty { display: none; }
 .result { display: flex; gap: .75em; align-items: center; padding-top: .35em; }
-.ring { flex: none; width: 3em; height: 3em; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--ink);
-  background: conic-gradient(var(--c) calc(var(--p) * 1%), #efe2cd 0); }
-.ring span { width: 2.3em; height: 2.3em; border-radius: 50%; display: grid; place-items: center; background: #fffdf8; font-family: var(--round); font-size: .78em; }
+.ring { flex: none; width: 2.9em; height: 2.9em; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--ink);
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(222,206,182,.6) 0); }
+.ring span { width: 2.2em; height: 2.2em; border-radius: 50%; display: grid; place-items: center; background: #fffaf1; font-family: var(--hand); font-weight: 700; font-size: .78em; }
 .words { display: flex; flex-wrap: wrap; gap: .25em; }
-.w { padding: .08em .38em; border-radius: 6px; font-weight: 650; font-size: .92em; }
-.w.ok { background: #d9f4dc; color: #1f6b33; }
-.w.missed { background: #ffd9d2; color: #a3321f; text-decoration: line-through; }
-.w.wrong { background: #ffefb8; color: #7a5a00; }
+.w { padding: .06em .36em; border-radius: 6px; font-weight: 650; font-size: .92em; }
+.w.ok { background: rgba(141,214,150,.45); color: #1f6b33; }
+.w.missed { background: rgba(255,170,155,.5); color: #a3321f; text-decoration: line-through; }
+.w.wrong { background: rgba(255,214,102,.5); color: #7a5a00; }
 .w.extra { color: var(--muted); font-style: italic; }
 .pace, .status { color: var(--muted); font-size: .82em; }
 
-/* Status chips (hidden while the stage is open) */
+/* Status chips (hidden while the scroll is open) */
 .chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; transition: opacity .2s; }
 .wrap.open .chips { opacity: 0; }
-.chip { display: inline-flex; align-items: center; gap: .45em; padding: .35em .8em .35em .4em; border-radius: 999px; font-family: var(--round);
-  font-size: 13px; color: var(--ink); background: rgba(255,247,236,.94); border: 1.5px solid var(--ink); animation: rise .25s ease-out both; }
+.chip { display: inline-flex; align-items: center; gap: .45em; padding: .32em .8em .32em .4em; font-family: var(--hand); font-weight: 700; font-size: 13px;
+  color: var(--ink); background: rgba(255,248,236,.92); border: 1.5px solid var(--ink); border-radius: 14px 18px 13px 19px / 18px 13px 19px 14px;
+  animation: rise .25s ease-out both; }
 .chip img { width: 20px; height: auto; }
 .chip.ok { background: rgba(230,247,225,.95); } .chip.warn { background: rgba(255,231,199,.95); } .chip.offline { background: rgba(255,220,210,.95); }
 .spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid #f3d9b4; border-top-color: var(--shiba-deep); animation: spin .8s linear infinite; }
 
+@container (max-height: 600px) { .prev { display: none; } .head { padding-top: .9em; } .summary { -webkit-line-clamp: 3; } .orig { font-size: 1.22em; } }
 @container (max-width: 640px) {
-  .scene { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); top: 12cqh; gap: 2.5cqh; }
-  .hero { flex-direction: row-reverse; align-items: flex-end; }
-  .dogwrap { width: 16cqw; }
-  .bubble::after { left: auto; right: -8.5px; bottom: 14px; transform: rotate(-45deg); }
-  .tools .label, .when { display: none; }
+  .scroll { left: 3cqw; right: 3cqw; width: auto; top: auto; bottom: 12cqh; max-height: 74cqh; }
+  .foot .label, .when { display: none; }
 }
 
-@keyframes bob { from { transform: translateY(0) rotate(-1.5deg); } to { transform: translateY(-6%) rotate(1.5deg); } }
-@keyframes talk { from { transform: translateY(0) scale(1, 1); } to { transform: translateY(-5%) scale(1.03, .97); } }
-@keyframes tilt { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }
-@keyframes enter { from { transform: translateY(30px) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
-@keyframes pop { 0% { transform: scale(.88); opacity: 0; } 100% { transform: none; opacity: 1; } }
-@keyframes rise { from { transform: translateY(10px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes bob { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-6%) rotate(2deg); } }
+@keyframes talk { from { transform: translateY(0) scale(1, 1); } to { transform: translateY(-6%) scale(1.04, .96); } }
+@keyframes tilt { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
+@keyframes pop { 0% { transform: scale(.85); } 100% { transform: none; } }
+@keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes wave { 0%, 100% { height: 25%; } 50% { height: 100%; } }
 @keyframes dot { 0%, 100% { transform: translateY(0); opacity: .45; } 50% { transform: translateY(-4px); opacity: 1; } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
@@ -199,13 +237,14 @@ export class Overlay {
   private host: HTMLDivElement | null = null;
   private wrap!: HTMLDivElement;
   private stage!: HTMLDivElement;
+  private paper!: HTMLDivElement;
   private canvas: HTMLCanvasElement | null = null;
   private chips!: HTMLDivElement;
   private offlineChip: HTMLDivElement | null = null;
   private statusChip: HTMLDivElement | null = null;
   private statusTimer: ReturnType<typeof setTimeout> | undefined;
   private content: HTMLElement[] = [];
-  private bubble: HTMLDivElement | null = null;
+  private sayEl: HTMLDivElement | null = null;
   private summaryEl: HTMLDivElement | null = null;
   private focusEl: HTMLDivElement | null = null;
   private dog: HTMLImageElement | null = null;
@@ -227,7 +266,7 @@ export class Overlay {
   private glyphs: string[] = [];
 
   constructor(private handlers: OverlayHandlers) {
-    // Esc closes the overlay even when focus is on the page (YouTube doesn't use Esc itself).
+    // Esc closes the scroll even when focus is on the page (YouTube doesn't use Esc itself).
     document.addEventListener("keydown", (e) => {
       if (this.open && e.key === "Escape") this.handlers.onClose();
     });
@@ -250,15 +289,15 @@ export class Overlay {
     const sheet = new CSSStyleSheet();
     sheet.replaceSync(CSS);
     root.adoptedStyleSheets = [sheet];
+
     this.canvas = h("canvas", "fx");
-    this.stage = h("div", "stage", h("div", "veil"), this.canvas);
-    // Keep clicks and keys on our controls from reaching YouTube's player (which would toggle play/pause).
-    // The veil itself lets clicks through: clicking the video resumes it, as usual.
-    for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu"])
-      this.stage.addEventListener(ev, (e) => {
-        if (e.target !== this.stage) e.stopPropagation();
-      });
-    this.stage.addEventListener("keydown", (e) => {
+    this.paper = h("div", "paper", this.canvas);
+    const scroll = h("div", "scroll", h("div", "roll top"), h("div", "ribbon"), this.paper, h("div", "roll bottom"));
+    // Keep clicks and keys on the scroll from reaching YouTube's player (which would toggle play/pause).
+    // Everything outside it lets clicks through: clicking the video resumes it, as usual.
+    for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu", "wheel"])
+      scroll.addEventListener(ev, (e) => e.stopPropagation());
+    scroll.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Escape") this.handlers.onClose();
       else if (e.key === " " || e.key === "k") {
@@ -266,6 +305,7 @@ export class Overlay {
         this.handlers.onResume();
       }
     });
+    this.stage = h("div", "stage", h("div", "shade"), scroll);
     this.chips = h("div", "chips");
     this.wrap = h("div", "wrap", this.stage, this.chips);
     root.append(this.wrap);
@@ -281,7 +321,7 @@ export class Overlay {
 
   chip(text: string, ms = 2200): void {
     if (this.open && this.summaryEl) {
-      this.summaryEl.replaceChildren(text); // the chips are hidden under the open stage
+      this.summaryEl.replaceChildren(text); // the chips are hidden while the scroll is open
       return;
     }
     if (!this.ensure()) return;
@@ -326,7 +366,7 @@ export class Overlay {
     else if (this.open) this.fx?.start();
   }
 
-  // ---------- Stage ----------
+  // ---------- The scroll ----------
 
   private loadFx(): void {
     if (this.fx || this.fxLoading || !this.canvas) return;
@@ -340,10 +380,10 @@ export class Overlay {
         this.fx.setSpeaking(this.isSpeaking);
         if (this.open && !this.hidden) this.fx.start();
       })
-      .catch((err) => console.warn("[Scriba] paper field unavailable", err)); // the overlay works without it
+      .catch((err) => console.warn("[Scriba] paper field unavailable", err)); // the scroll works without it
   }
 
-  /** Builds the top row and Scriba with the bubble, then fades the stage in. */
+  /** Writes the header, Scriba's note and the footer onto the scroll, then unrolls it. */
   private build(t: number | null): boolean {
     if (!this.ensure()) return false;
     clearTimeout(this.closeTimer);
@@ -353,17 +393,32 @@ export class Overlay {
     this.shadowBtns = [];
     this.hearBtns = [];
 
-    const logo = h("img");
-    logo.src = MASCOT();
-    logo.alt = "";
+    const face = h("img");
+    face.src = MASCOT();
+    face.alt = "";
     this.offlineTag = h("span", "offline-tag", "offline");
     this.offlineTag.style.display = this.isOffline ? "" : "none";
-
     const speed = h("button", "btn speed");
     speed.title = "Voice speed · click to change";
     speed.addEventListener("click", () => this.handlers.onVoiceRate(nextVoiceRate(this.voiceRate)));
     this.speedBtn = speed;
     this.fillSpeed(speed);
+    const close = h("button", "btn icon", icon("close"));
+    close.title = "Close (Esc)";
+    close.setAttribute("aria-label", "Close");
+    close.addEventListener("click", () => this.handlers.onClose());
+    const head = h("div", "head", face, h("span", "name", "Scriba"), h("span", "when", t === null ? "" : `paused at ${fmt(t)}`), this.offlineTag, speed, close);
+
+    this.dog = h("img", "dog");
+    this.dog.src = MASCOT();
+    this.dog.alt = "Scriba, a shiba inu holding a scroll";
+    this.summaryEl = h("div", "summary");
+    this.summaryEl.title = "Click to show all";
+    const summary = this.summaryEl;
+    summary.addEventListener("click", () => summary.classList.toggle("full"));
+    this.sayEl = h("div", "say", this.dog, this.summaryEl);
+    this.focusEl = h("div", "focus");
+    const body = h("div", "body", this.sayEl, squiggle(), this.focusEl);
 
     const link = (path: string, ico: keyof typeof ICONS, label: string, tip: string) => {
       const a = h("a", "btn", icon(ico), h("span", "label", label));
@@ -373,41 +428,21 @@ export class Overlay {
       a.title = tip;
       return a;
     };
-    const resume = h("button", "btn icon primary", icon("play"));
+    const resume = h("button", "btn primary", icon("play"), h("span", "label", "Keep watching"));
     resume.title = "Keep watching (Space)";
     resume.setAttribute("aria-label", "Keep watching");
     resume.addEventListener("click", () => this.handlers.onResume());
-    const close = h("button", "btn icon", icon("close"));
-    close.title = "Close (Esc)";
-    close.setAttribute("aria-label", "Close");
-    close.addEventListener("click", () => this.handlers.onClose());
-
-    const top = h(
+    const foot = h(
       "div",
-      "top",
-      h("div", "brand", logo, h("span", "", "Scriba"), t !== null && h("span", "when", `paused at ${fmt(t)}`), this.offlineTag),
-      h(
-        "div",
-        "tools",
-        speed,
-        link("/deck", "deck", "Deck", "Your deck: every line you paused on"),
-        link("/practice", "star", "Practice", "Practise your top lines"),
-        resume,
-        close,
-      ),
+      "foot",
+      link("/deck", "deck", "Deck", "Your deck: every line you paused on"),
+      link("/practice", "star", "Practice", "Practise your top lines"),
+      h("span", "grow"),
+      resume,
     );
 
-    this.summaryEl = h("div", "summary");
-    const wave = h("span", "wave", h("i"), h("i"), h("i"), h("i"));
-    this.bubble = h("div", "bubble", h("div", "says", "Scriba", wave), this.summaryEl);
-    this.dog = h("img", "dog");
-    this.dog.src = MASCOT();
-    this.dog.alt = "Scriba, a shiba inu holding a scroll";
-    this.focusEl = h("div", "focus");
-    const scene = h("div", "scene", h("div", "hero", this.bubble, h("div", "dogwrap", h("div", "floor"), this.dog)), this.focusEl);
-
-    this.content = [top, scene];
-    this.stage.append(top, scene);
+    this.content = [head, body, foot];
+    this.paper.append(head, body, foot);
     this.open = true;
     this.wrap.classList.add("open");
     requestAnimationFrame(() => this.stage.classList.add("on"));
@@ -416,7 +451,7 @@ export class Overlay {
     return true;
   }
 
-  /** Shown immediately on pause, so the overlay is never blank. */
+  /** Shown immediately on pause, so the scroll is never blank. */
   thinking(t: number | null = null): void {
     if (!this.build(t)) return;
     this.isSpeaking = false;
@@ -430,7 +465,7 @@ export class Overlay {
     if ((!this.open || !this.focusEl) && !this.build(t)) return;
     this.dog?.classList.remove("thinking");
     this.summaryEl?.classList.toggle("muted", !e.lines.length);
-    this.summaryEl?.replaceChildren(e.summary);
+    this.summaryEl?.replaceChildren(e.summary, h("span", "wave", h("i"), h("i"), h("i"), h("i")));
     this.results = [];
     this.shadowBtns = [];
     this.hearBtns = [];
@@ -440,7 +475,7 @@ export class Overlay {
       this.focusEl?.replaceChildren();
       return;
     }
-    // The line you paused for gets the card and the buttons; earlier ones are quiet rows below.
+    // The line you paused for gets the buttons; the one before it is a quiet row below.
     const line = e.lines[i];
     const actions = h("div", "actions");
     if (can.hear(line)) {
@@ -473,15 +508,15 @@ export class Overlay {
       h("div", "orig", line.original),
       line.romanization && h("div", "rom", line.romanization),
       line.translation && h("div", "en", line.translation),
-      line.notes.length > 0 && h("ul", "notes", ...line.notes.map((n) => h("li", "", n))),
       actions.childElementCount > 0 && actions,
       result,
+      line.notes.length > 0 && h("ul", "notes", ...line.notes.map((n) => h("li", "", n))),
     );
-    // Minimal: only the line right before it, for context.
-    const earlier = e.lines
-      .slice(Math.max(0, i - 1), i)
-      .map((l) => h("div", "prev", h("div", "o", l.original), l.romanization && h("div", "r", l.romanization), l.translation && h("div", "t", l.translation)));
-    this.focusEl?.replaceChildren(card, ...(earlier.length ? [h("div", "earlier", ...earlier)] : []));
+    const prev = i > 0 ? e.lines[i - 1] : null;
+    const kids: Node[] = [card];
+    if (prev)
+      kids.push(h("div", "prev", h("div", "o", prev.original), prev.romanization && h("div", "r", prev.romanization), prev.translation && h("div", "t", prev.translation)));
+    this.focusEl?.replaceChildren(...kids);
 
     this.glyphs = glyphsFor(e.lines);
     this.fx?.setGlyphs(this.glyphs);
@@ -491,11 +526,11 @@ export class Overlay {
     this.isSpeaking = on;
     this.dog?.classList.remove("thinking");
     this.dog?.classList.toggle("speaking", on);
-    this.bubble?.classList.toggle("speaking-on", on);
+    this.sayEl?.classList.toggle("speaking-on", on);
     this.fx?.setSpeaking(on);
   }
 
-  /** The speed shown in the top-right pill. Pops when it changes. */
+  /** The speed shown in the header pill. Pops when it changes. */
   setVoiceRate(rate: number): void {
     const changed = rate !== this.voiceRate;
     this.voiceRate = rate;
@@ -578,9 +613,9 @@ export class Overlay {
       this.fx?.stop();
       for (const el of this.content) el.remove();
       this.content = [];
-    }, 300);
+    }, 320);
     this.dog = null;
-    this.bubble = null;
+    this.sayEl = null;
     this.summaryEl = null;
     this.focusEl = null;
     this.speedBtn = null;
