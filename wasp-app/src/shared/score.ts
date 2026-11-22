@@ -1,14 +1,10 @@
+import { tokenize } from "./text";
 import type { ShadowResult } from "./types";
 
-/** Lowercase, strip accents (NFD + combining marks) and punctuation, split on whitespace. */
+/** Lowercase, strip accents (NFD + combining marks) and punctuation, split into words.
+ * Chinese/Japanese have no spaces, so each character is its own token. */
 export function normalize(s: string): string[] {
-  return s
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}+/gu, "")
-    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
-    .split(/\s+/)
-    .filter(Boolean);
+  return tokenize(s);
 }
 
 type Diff = ShadowResult["diff"];

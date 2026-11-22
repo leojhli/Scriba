@@ -2,22 +2,20 @@ import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ExtExplain } from "wasp/server/api";
-import { LANGUAGE } from "../shared/config";
 import type { Explanation } from "../shared/types";
 import { window as segWindow } from "../shared/window";
 import { checkDemoKey } from "./demoKey";
 import { speak } from "./eleven";
 import { recordPause } from "./moments";
 import { readJson, videoDir, writeJson } from "./paths";
-import { getVideo, readTranslations, translationsFile } from "./videos";
+import { getVideo, readTranslations, translationsFile, videoLanguage } from "./videos";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
 const CLAUDE_TIMEOUT_MS = 10_000; // ~4 s typical for 3 lines; TTS adds ~1 s (extension waits 15 s)
 const MAX_LINES = 3; // the last few lines keep it fast and focused
+const PROCESSED_S = 180; // ingest downloads "*0:00-3:00"
 
-const LANGUAGE_NAMES: Record<string, string> = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese" };
-
-const SYSTEM = `You are a friendly ${LANGUAGE_NAMES[LANGUAGE] ?? LANGUAGE} tutor watching a video with a learner. For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. Then write a spoken summary of at most 2 sentences. Reply only with JSON matching the Explanation type.`;
+const SYSTEM = `You are a friendly language tutor watching a video with a learner who is studying the language spoken in it (any language; detect it from the lines). For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. For Chinese include pinyin for key words, for Japanese include romaji. Then write a spoken summary in English of at most 2 sentences. Reply only with JSON matching the Explanation type.`;
 
 const SCHEMA = {
   type: "object",
@@ -50,9 +48,10 @@ function claude(): Anthropic {
   return (anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS }));
 }
 
-async function askClaude(lines: Line[], title: string): Promise<ClaudeOut> {
+async function askClaude(lines: Line[], title: string, language: string | null): Promise<ClaudeOut> {
   const user = JSON.stringify({
     video: title,
+    ...(language ? { language } : {}),
     lines: lines.map((l) => ({ segmentId: l.segmentId, text: l.text })),
   });
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -108,14 +107,23 @@ export const extExplain: ExtExplain = async (req, res) => {
   const captionLines = body.captionLines ?? [];
 
   // Scribe segments when ready; otherwise the live captions the extension read.
-  const lines: Line[] = video?.segments
+  const fromSegments: Line[] = video?.segments
     ? segWindow(video.segments, t).map((s) => ({ segmentId: s.id, text: s.text, start: s.start, end: s.end }))
+    : [];
+  // Scribe only covers the first 3 minutes; past that (or while processing) use the live captions.
+  const lines: Line[] = fromSegments.length
+    ? fromSegments
     : segWindow(captionLines, t).map((c) => ({ segmentId: -1, text: c.text, start: c.start, end: c.end }));
   lines.splice(0, Math.max(0, lines.length - MAX_LINES));
 
   if (!lines.length) {
     const processing = !video || video.status === "processing";
-    const summary = processing && !captionLines.length ? "Still listening… give me a few seconds." : "Nothing's been said yet. Play a bit more!";
+    const summary =
+      processing && !captionLines.length
+        ? "Still listening… give me a few seconds."
+        : t > PROCESSED_S
+          ? "I transcribed the first 3 minutes. Past that I read YouTube's captions, so turn on CC and play a little."
+          : "Nothing's been said yet. Play a bit more!";
     res.json({ summary, audioUrl: null, lines: [] } satisfies Explanation);
     return;
   }
@@ -125,7 +133,7 @@ export const extExplain: ExtExplain = async (req, res) => {
   const key = String(Math.round(t));
   let explanation: Explanation;
   try {
-    const out = await askClaude(lines, video?.title ?? videoId);
+    const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId));
     const byId = new Map(out.lines.map((l) => [l.segmentId, l]));
     explanation = {
       summary: out.summary,

@@ -1,6 +1,6 @@
 # How to demo Pause & Effect
 
-**The product in one line:** you watch a Spanish YouTube video. When you pause, a mascot explains the last few lines out loud, and every line you paused on becomes a card you can practise.
+**The product in one line:** you watch a YouTube video in the language you're learning. When you pause, a mascot explains the last few lines out loud, and every line you paused on becomes a card you can practise. The language is auto-detected; Spanish and Mandarin are verified end to end.
 
 ## 0. One-time setup (≈5 min)
 
@@ -23,7 +23,10 @@
    cd ~/yc-elevenlabs/extension && npm i && npm run build
    ```
    Open `chrome://extensions`, turn on Developer mode, click **Load unpacked** and pick the `extension/` folder. After any rebuild, click the reload icon on the card, then refresh the YouTube tab.
-4. **Pick the demo video.** Use a Spanish video, ideally with music under the dialogue, so "Hear it clearly" has something to remove. Open it once about 2 minutes before you demo so the first 3 minutes get processed.
+4. **Pick the demo video.** Any language works, ideally with music under the dialogue so "Hear it clearly" has something to remove. Open it once about 2 minutes before you demo so the first 3 minutes get processed. These are already processed and ready:
+   - Spanish: Brad Pitt sled-dog clip, `aUGOFL0Ygsw` (pause at ~1:41)
+   - Mandarin: Street Talk interview, `YCIFNPMu0hs` (pause at ~0:25, after "请问你今年芳龄？")
+   - Mandarin songs, great for Hear it clearly: 周興哲 `wSBXfzgqHtE`, Jay Chou 告白氣球 `bu7nU9Mhpyo`
 
 ## 1. Demo each step
 
@@ -36,6 +39,14 @@
 | **5. Shadow it** | Hold **🎙 Hold to shadow**, say the line and release. Allow the mic the first time. | A score like "75%" with coloured words: green = correct, red struck-through = missed, amber = wrong. Also shows pace ("1.10× · good pace"). | Saying it badly gives a lower score. Saying nothing gives 0% with every word missed, not an error. |
 | **6. Your deck** | Open <http://localhost:3000/deck>. | One card per line you paused on, most-paused first, with "paused 2×" and your best score or "not practised". Clicking a card jumps back to that moment on YouTube. | The page refreshes every 5 s, so you can keep it open in a second window. |
 | **7. Practice** | Click **Practice top 5 →**. | Steps through your top 5 lines: hear the clean clip, read the translation, shadow it, then **Next →**. | Practising updates "best %" on the deck. |
+
+## 1b. Demo with any video (or a judge's pick)
+
+1. Paste the YouTube link into the demo Chrome window.
+2. A chip in the top-left says **"Listening to the first 3 minutes…"** for about 60–70 s, then **"Ready · pause anytime"**.
+3. Pause anywhere in the first 3 minutes for the full experience: voice, Hear it clearly, shadowing, and the line goes to your deck.
+4. After 3:00, turn on **CC**: the panel explains from YouTube's own captions instead. You won't get "Hear it clearly" there, and those lines aren't added to the deck.
+5. **Any language:** it's auto-detected per video. Translations and the spoken summary are in English. Chinese notes include pinyin and Japanese notes include romaji. Shadowing scores Chinese and Japanese per character.
 
 ## 2. The 3-minute script
 
@@ -64,6 +75,7 @@
 | Symptom | Fix |
 |---|---|
 | No bubble on pause | Reload the extension at `chrome://extensions`, then refresh the YouTube tab. Check the console for `[Pause&Effect] listening`. |
+| "Can't reach the server" chip | `wasp start` isn't running. Start it, and the chip clears on its own. |
 | "offline mode" chip all the time | `wasp start` isn't running, or the keys are missing in `.env.server`. Check the server terminal. |
 | Console says `ingest failed` | Usually a missing ElevenLabs key or an outdated yt-dlp. Fix it and refresh the tab: a reload retries the ingest. |
 | No voice | Click anywhere on the page once (autoplay policy), then pause again. |

@@ -1,5 +1,4 @@
-// Keep LANGUAGE identical to wasp-app/src/shared/config.ts.
-export const LANGUAGE = "es";
+// The video language is auto-detected per video by Scribe (no fixed LANGUAGE).
 
 export const SERVER_URL = "http://localhost:3001";
 export const WEB_URL = "http://localhost:3000";

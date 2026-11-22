@@ -33,6 +33,15 @@ Not verified: shadowing with a real microphone (needs a human), and the /practic
 
 **Demo Chrome window:** Chrome 157 ignores `--load-extension`, so the demo profile (`.chrome-demo-profile/`, gitignored) is launched with `--enable-unsafe-extension-debugging --remote-debugging-port=9333`, and the extension is loaded via the CDP call `Extensions.loadUnpacked`. Or just use "Load unpacked" in normal Chrome.
 
+## Any language (decided 2026-11-22)
+
+The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.
+- **Detection:** Scribe auto-detects the language per video. It is saved as `language` in `data/{id}/video.json` and reused when transcribing shadowing attempts.
+- **Chinese and Japanese text:** `src/shared/text.ts` joins words without spaces between Han/Kana characters. `src/shared/segments.ts` splits lines at 。！？ as well as .?!, at pauses over 0.8 s, and at a comma once a line is already 6 s long (lyrics).
+- **Scoring:** `normalize()` tokenizes Han/Kana per character, so Chinese and Japanese are scored per character.
+- **Tutor prompt:** language-neutral. It writes English translations, adds pinyin or romaji for Chinese and Japanese, and gives the spoken summary in English.
+- **Verified end to end:** Spanish (`aUGOFL0Ygsw`) and Mandarin (`YCIFNPMu0hs`; the explanation came back in 7 s with pinyin notes).
+
 ## Scope decision: pause is the only signal
 
 The team decided to drop rewind/replay/captions-on/slowdown tracking. **Pausing is the whole interaction: pause → explanation + voice, and the line goes into the deck.** The deck ranks lines by how many times you paused on them. There is no `/ext/struggle`, no `struggle.ts` and no "flagged" chips. The extension still *reads* on-screen captions, but only as the transcript fallback while Scribe is processing.
@@ -66,6 +75,9 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
   - **No innerHTML in the extension:** YouTube enforces Trusted Types, so the overlay builds its DOM with a small `h()` helper and styles via `adoptedStyleSheets`. Clicks inside the bubble call `stopPropagation()` so they don't toggle YouTube's play/pause.
   - Media goes from the background worker to the content script as base64, and the content script turns it into a `blob:` URL. Service workers can't create blob URLs.
   - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 5.5 s timeout. TTS uses the stock voice `JBFqnCBsd6RMkjVDRZzb` with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
+  - **Titles come from yt-dlp** (`--print after_move:title`), because the YouTube page title is stale right after in-app navigation. Before this fix, titles were off by one video.
+  - **Re-ingest:** clears the old line data (`segments` set to null, `explain-*`, `translations.json`), because line ids change.
+  - **Status chip:** the extension shows "Listening to the first 3 minutes…", then "Ready · pause anytime", then "Couldn't process…" or "Can't reach the server". Past 3:00, explain falls back to captions and says so if CC is off.
   - **Git:** commit as the user's identity, with no `Co-Authored-By: Claude` trailer.
 - **Extension ↔ background messaging:** the content script calls `chrome.runtime.sendMessage({ type: "api", path, body })` and gets back `{ ok: true, data } | { ok: false, error }`. The background worker adds `x-demo-key` and the 8 s timeout (`extension/src/shared/config.ts`).
 - **Server auth for /ext/\*:** call `checkDemoKey(req, res)` from `wasp-app/src/server/demoKey.ts` at the top of every ext handler.
@@ -108,7 +120,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 - One demo laptop runs everything: Chrome with the unpacked extension, plus the Wasp server on `localhost:3001`. (Wasp go/no-go passed: Wasp 0.22.0 is installed.)
 - YouTube only. Netflix goes on the roadmap slide (DRM blocks its audio and video).
 - Real input: the demo runs on a real YouTube video in Spanish. A judge can pick a different one. The first 3 minutes are processed, and two pre-processed videos are the fallback.
-- Language: Spanish (`"es"`), set in `shared/config.ts` as `LANGUAGE`.
+- Language: any. Auto-detected per video by Scribe (originally Spanish only; see "Any language").
 - Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY`. The extension holds only `DEMO_KEY`, which maps every request to the demo user.
 - Never a blank overlay: it shows "thinking…" immediately, and every call has an 8 s timeout with a cached fallback.
 - Mascot voice: a stock ElevenLabs voice, never a cloned actor.
@@ -258,7 +270,7 @@ Watch it fail, implement, watch it pass. Commit.
 Produces `/ext/explain`.
 
 - Lines come from `window()` over the Scribe segments, or from `captionLines` while the video is still processing. With no lines, return `{ summary: "Nothing's been said yet. Play a bit more!", audioUrl: null, lines: [] }` (Review Focus 1). Record a pause Moment.
-- Call Claude with this system prompt: *"You are a friendly {LANGUAGE} tutor watching a video with a learner. For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. Then write a spoken summary of at most 2 sentences. Reply only with JSON matching the Explanation type."* Retry once on invalid JSON, then fall back to the lines with no notes.
+- Call Claude (language-neutral now; see "Any language") with a system prompt like: *"You are a friendly language tutor watching a video with a learner. For each line, give a natural English translation and 1–2 short notes on idioms, slang, grammar or what is happening in the scene. Then write a spoken summary of at most 2 sentences. Reply only with JSON matching the Explanation type."* Retry once on invalid JSON, then fall back to the lines with no notes.
 - `speak(summary)` → `explain-{Math.round(t)}.mp3`. The overlay plays it through a blob URL and the mascot bounces while it plays.
 - **Verify:** pause, and the voice starts within 5 s on venue Wi-Fi.
 

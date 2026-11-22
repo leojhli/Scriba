@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
+import { groupWords, type Word } from "../shared/segments";
 import type { Segment } from "../shared/types";
 
 const SCRIBE_MODEL = process.env.ELEVENLABS_SCRIBE_MODEL ?? "scribe_v2";
@@ -13,14 +14,17 @@ function eleven(): ElevenLabsClient {
   return (client ??= new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY }));
 }
 
-export type Word = { text: string; start: number; end: number };
+export type { Word };
 
-/** Scribe with word timestamps. Returns only spoken words (no spacing / audio events). */
-export async function transcribeWords(path: string, lang: string): Promise<{ text: string; words: Word[] }> {
+/** Scribe with word timestamps. `lang` omitted = auto-detect. Returns only spoken words. */
+export async function transcribeWords(
+  path: string,
+  lang?: string | null,
+): Promise<{ text: string; language: string | null; words: Word[] }> {
   const res = await eleven().speechToText.convert({
     file: { path },
     modelId: SCRIBE_MODEL,
-    languageCode: lang,
+    ...(lang ? { languageCode: lang } : {}),
     timestampsGranularity: "word",
     tagAudioEvents: false,
   });
@@ -28,36 +32,13 @@ export async function transcribeWords(path: string, lang: string): Promise<{ tex
   const words = res.words
     .filter((w) => w.type === "word" && w.start != null && w.end != null)
     .map((w) => ({ text: w.text, start: w.start!, end: w.end! }));
-  return { text: res.text, words };
+  return { text: res.text, language: res.languageCode || null, words };
 }
 
-/** Group words into segments, splitting after .?! or at any gap over 0.8 s. Ids from 0. */
-export function groupWords(words: Word[], maxGap = 0.8): Segment[] {
-  const segs: Segment[] = [];
-  let cur: Word[] = [];
-  const flush = () => {
-    if (!cur.length) return;
-    segs.push({
-      id: segs.length,
-      start: cur[0].start,
-      end: cur[cur.length - 1].end,
-      text: cur.map((w) => w.text).join(" ").replace(/\s+([,.?!;:])/g, "$1"),
-    });
-    cur = [];
-  };
-  for (const w of words) {
-    const prev = cur[cur.length - 1];
-    if (prev && w.start - prev.end > maxGap) flush();
-    cur.push(w);
-    if (/[.?!…]["»”']?$/.test(w.text)) flush();
-  }
-  flush();
-  return segs;
-}
-
-export async function transcribe(path: string, lang: string): Promise<Segment[]> {
-  const { words } = await transcribeWords(path, lang);
-  return groupWords(words);
+/** Transcribes a whole video's audio, auto-detecting the language. */
+export async function transcribe(path: string, lang?: string | null): Promise<{ segments: Segment[]; language: string | null }> {
+  const { words, language } = await transcribeWords(path, lang);
+  return { segments: groupWords(words), language };
 }
 
 async function streamToBuffer(stream: ReadableStream<Uint8Array>): Promise<Buffer> {

@@ -5,7 +5,6 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { prisma } from "wasp/server";
 import type { ExtSession } from "wasp/server/api";
-import { LANGUAGE } from "../shared/config";
 import { checkDemoKey } from "./demoKey";
 import { isolate, transcribe } from "./eleven";
 import { videoDir, writeJson } from "./paths";
@@ -43,8 +42,8 @@ export const extSession: ExtSession = async (req, res) => {
     void startIngest(videoId);
   } else if (video.status !== "ready" && !running.has(videoId)) {
     // Retry a failed ingest (e.g. after keys were added) or one orphaned by a server restart.
-    await prisma.video.update({ where: { id: videoId }, data: { status: "processing" } });
-    video = { ...video, status: "processing" };
+    await prisma.video.update({ where: { id: videoId }, data: { status: "processing", segments: null } });
+    video = { ...video, status: "processing", segments: null };
     void startIngest(videoId);
   }
 
@@ -71,8 +70,10 @@ export async function ingest(videoId: string): Promise<void> {
   const dir = videoDir(videoId);
   const ffmpeg = ffmpegPath();
 
-  for (const f of fs.readdirSync(dir)) if (f.startsWith("source.")) fs.rmSync(path.join(dir, f));
-  await run(
+  // A fresh ingest renumbers the lines, so drop anything keyed by the old line ids.
+  for (const f of fs.readdirSync(dir))
+    if (f.startsWith("source.") || f.startsWith("explain-") || f === "translations.json") fs.rmSync(path.join(dir, f));
+  const { stdout } = await run(
     YTDLP,
     [
       "--no-playlist",
@@ -86,6 +87,9 @@ export async function ingest(videoId: string): Promise<void> {
       ffmpeg,
       "--download-sections",
       "*0:00-3:00",
+      // The page title can be stale right after YouTube's in-app navigation, so take it from yt-dlp.
+      "--print",
+      "after_move:title",
       "-f",
       "mp4[height<=360]/best[height<=360]/bestaudio",
       "-o",
@@ -102,14 +106,20 @@ export async function ingest(videoId: string): Promise<void> {
     timeout: 120_000,
   });
 
-  const [segments, dialogue] = await Promise.all([
-    transcribe(audio, LANGUAGE),
+  const [{ segments, language }, dialogue] = await Promise.all([
+    transcribe(audio), // language auto-detected per video
     isolate(audio, path.join(dir, "dialogue.mp3")),
   ]);
 
-  const data = { status: "ready", hasDialogue: dialogue !== null, segments: JSON.stringify(segments) };
+  const title = stdout.trim().split("\n").pop()?.trim();
+  const data = {
+    status: "ready",
+    hasDialogue: dialogue !== null,
+    segments: JSON.stringify(segments),
+    ...(title ? { title } : {}),
+  };
   const v = await prisma.video.update({ where: { id: videoId }, data });
   // Snapshot for demo-cache/ (Task 8): copy data/{id} there and `wasp db seed` reloads it.
-  writeJson(path.join(dir, "video.json"), { id: v.id, title: v.title, hasDialogue: v.hasDialogue, segments });
-  console.log(`[ingest] ${videoId}: ${segments.length} segments, dialogue=${data.hasDialogue}`);
+  writeJson(path.join(dir, "video.json"), { id: v.id, title: v.title, language, hasDialogue: v.hasDialogue, segments });
+  console.log(`[ingest] ${videoId}: ${segments.length} segments, language=${language}, dialogue=${data.hasDialogue}`);
 }

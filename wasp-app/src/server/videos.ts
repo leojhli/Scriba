@@ -3,6 +3,11 @@ import { prisma } from "wasp/server";
 import type { Segment } from "../shared/types";
 import { DATA_DIR, readJson } from "./paths";
 
+/** Language Scribe detected at ingest (e.g. "spa", "cmn"), or null if unknown. */
+export function videoLanguage(videoId: string): string | null {
+  return readJson<{ language?: string | null }>(path.join(DATA_DIR, videoId, "video.json"), {}).language ?? null;
+}
+
 export type VideoStatus = "processing" | "ready" | "failed";
 export type VideoInfo = {
   id: string;

@@ -47,6 +47,7 @@ function onNavigate(): void {
   session = null;
   clearTimeout(pollTimer);
   captions.reset();
+  overlay.status(null);
   overlay.hideBubble();
   stopAudio();
   if (id) pollSession(id);
@@ -63,15 +64,19 @@ async function pollSession(id: string): Promise<void> {
     overlay.offline(!!res.offline);
     if (session.status === "ready") {
       log(`ready: ${session.segments?.length ?? 0} segments, dialogue=${session.hasDialogue}`, session.segments);
+      overlay.status("Ready · pause anytime", "ok", 4000);
       return;
     }
     if (session.status === "failed") {
       log("ingest failed on the server; using live captions only (reload to retry)");
+      overlay.status("Couldn't process this video · turn on CC and I'll read the captions", "warn", 8000);
       return;
     }
     log("processing… (Scribe + Voice Isolator)");
+    overlay.status("Listening to the first 3 minutes…", "busy");
   } else {
     log("server unreachable, retrying", res.error);
+    overlay.status("Can't reach the server · retrying", "warn");
   }
   pollTimer = setTimeout(() => pollSession(id), SESSION_POLL_MS);
 }

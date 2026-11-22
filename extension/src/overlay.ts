@@ -147,7 +147,11 @@ const CSS = `
 .chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; }
 .chip { display: inline-flex; align-items: center; gap: .4em; padding: .4em .8em; border-radius: 999px; font-size: 13px; font-weight: 650;
   background: rgba(18,18,24,.75); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,.14); animation: rise .25s ease-out both; }
-.chip.offline { color: #ffd27a; }
+.chip.offline, .chip.warn { color: #ffd27a; }
+.chip.ok { color: #b5f5c4; }
+.spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid rgba(255,255,255,.25);
+  border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 @keyframes blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(.1); } }
 @keyframes bob { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-4px) rotate(2deg); } }
@@ -167,6 +171,8 @@ export class Overlay {
   private scrim!: HTMLDivElement;
   private chips!: HTMLDivElement;
   private offlineChip: HTMLDivElement | null = null;
+  private statusChip: HTMLDivElement | null = null;
+  private statusTimer: ReturnType<typeof setTimeout> | undefined;
   private panel: HTMLDivElement | null = null;
   private mascot: HTMLDivElement | null = null;
   private top: HTMLDivElement | null = null;
@@ -194,6 +200,7 @@ export class Overlay {
     this.scrim = h("div", "scrim");
     this.chips = h("div", "chips");
     this.wrap.append(this.scrim, this.chips);
+    if (this.statusChip) this.chips.append(this.statusChip);
     if (this.offlineChip) this.chips.append(this.offlineChip);
     root.append(this.wrap);
     player.appendChild(this.host);
@@ -206,6 +213,18 @@ export class Overlay {
     const c = h("div", "chip", text);
     this.chips.append(c);
     setTimeout(() => c.remove(), ms);
+  }
+
+  /** Processing / ready chip. `ms` auto-hides it; null clears it. */
+  status(text: string | null, kind: "busy" | "ok" | "warn" = "busy", ms = 0): void {
+    clearTimeout(this.statusTimer);
+    this.statusChip?.remove();
+    this.statusChip = null;
+    if (!text || !this.ensure()) return;
+    const c = h("div", `chip ${kind}`, kind === "busy" && h("span", "spin"), text);
+    this.statusChip = c;
+    this.chips.prepend(c);
+    if (ms) this.statusTimer = setTimeout(() => this.status(null), ms);
   }
 
   offline(on: boolean): void {

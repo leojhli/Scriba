@@ -2,14 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "wasp/server";
 import type { ExtShadow } from "wasp/server/api";
-import { LANGUAGE } from "../shared/config";
 import { score } from "../shared/score";
 import type { ShadowResult } from "../shared/types";
 import { checkDemoKey } from "./demoKey";
 import { getDemoUserId } from "./demoUser";
 import { transcribeWords } from "./eleven";
 import { videoDir } from "./paths";
-import { getVideo } from "./videos";
+import { getVideo, videoLanguage } from "./videos";
 
 export type ShadowInput = {
   videoId: string;
@@ -35,7 +34,7 @@ export async function scoreAttempt(input: ShadowInput, userId: number): Promise<
     const file = path.join(videoDir(videoId), `shadow-${Date.now()}.webm`);
     fs.writeFileSync(file, Buffer.from(audioBase64, "base64"));
     try {
-      heard = (await transcribeWords(file, LANGUAGE)).text ?? "";
+      heard = (await transcribeWords(file, videoLanguage(videoId))).text ?? "";
     } finally {
       fs.rmSync(file, { force: true });
     }
