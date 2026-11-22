@@ -30,7 +30,7 @@ export async function getVideo(videoId: string): Promise<VideoInfo | null> {
 }
 
 /** Per-segment translations/notes that /ext/explain has produced, used by /deck and /practice. */
-export type TranslationMap = Record<string, { translation: string; notes: string[] }>;
+export type TranslationMap = Record<string, { translation: string; notes: string[]; romanization?: string }>;
 
 export function translationsFile(videoId: string): string {
   return path.join(DATA_DIR, videoId, "translations.json");

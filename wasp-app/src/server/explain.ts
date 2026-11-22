@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ExtExplain } from "wasp/server/api";
-import { spokenText } from "../shared/text";
+import { hasNonLatin, spokenText } from "../shared/text";
 import type { Explanation } from "../shared/types";
 import { window as segWindow } from "../shared/window";
 import { checkDemoKey } from "./demoKey";
@@ -15,12 +15,17 @@ const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
 const CLAUDE_TIMEOUT_MS = 10_000; // ~4 s typical for 3 lines; TTS adds ~1 s (extension waits 15 s)
 const MAX_LINES = 3; // the last few lines keep it fast and focused
 const PROCESSED_S = 180; // ingest downloads "*0:00-3:00"
+const BACKGROUND_LINES = 20; // earlier lines Claude reads (not shown) to understand the moment
 
-const SYSTEM = `You are a friendly language tutor sitting next to a learner who is watching a video in the language they're learning (any language; detect it from the lines). The learner just paused right after the line in "justSaid". "context" holds the lines just before it, oldest first.
+const SYSTEM = `You are a friendly language tutor sitting next to a learner who is watching a video in the language they're learning (any language; detect it from the lines). The learner just paused right after the line in "justSaid". "context" holds the lines just before it, oldest first. "background" holds what was said earlier in the video, oldest first: together with the video title, use it to understand the situation (who is talking to whom, what is going on, what the line refers to). Don't reveal what happens later.
 
 Reply only with JSON:
-- "lines": one entry for every line (each context line and the justSaid line), with its index, a natural English translation, and short notes: 1–2 for the justSaid line (idioms, slang, grammar, or why it is said that way) and at most 1 for each context line. For Chinese include pinyin for key words; for Japanese include romaji.
-- "summary": what you say out loud. 1–2 short spoken sentences (30 words at most) in English about the justSaid line only: what it means and the single most useful thing to know about it (a word, an idiom, a grammar point or the tone). Do not recap the scene, the story or the song, and do not open with "In this clip" or "Here". Talk to the learner directly, like a friend leaning over. Don't guess a speaker's gender: say "they" or use a name from the lines. You may quote one short word or phrase from the line in its original script, but never write pinyin or romaji in the summary.`;
+- "lines": one entry for every line (each context line and the justSaid line), with:
+  - "index";
+  - "romanization": if the line is in a non-Latin script, the whole line in Latin letters: Hanyu Pinyin with tone marks for Chinese, Hepburn romaji for Japanese, Revised Romanization for Korean, a standard transliteration for any other script. Keep words already in Latin letters as they are. Empty string for a line in a Latin-script language;
+  - "translation": a natural English translation;
+  - "notes": 1–2 short notes for the justSaid line and at most 1 for each context line: what the line means at this moment in the video (what it refers to, the joke, feeling or subtext), idioms, slang or grammar. Give the reading of key words in non-Latin scripts (pinyin, romaji…).
+- "summary": what you say out loud. 1–2 short spoken sentences (45 words at most) in English about the justSaid line: what it means here, at this moment in the video (who it's aimed at, what it refers to, the joke, feeling or subtext), and the single most useful thing to learn from it (a word, an idiom, a grammar point or the tone). A quick bit of plot recap to set the line up is fine, but keep the focus on this line: no overview of the whole video or song, and don't open with "In this clip" or "Here". Talk to the learner directly, like a friend leaning over. Don't guess a speaker's gender: say "they" or use a name from the lines. You may quote one short word or phrase from the line in its original script, but never write pinyin or romaji in the summary.`;
 
 const SCHEMA = {
   type: "object",
@@ -33,9 +38,10 @@ const SCHEMA = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["index", "translation", "notes"],
+        required: ["index", "romanization", "translation", "notes"],
         properties: {
           index: { type: "integer" },
+          romanization: { type: "string" },
           translation: { type: "string" },
           notes: { type: "array", items: { type: "string" } },
         },
@@ -45,7 +51,7 @@ const SCHEMA = {
 } as const;
 
 type Line = { segmentId: number; text: string; start: number; end: number };
-type ClaudeOut = { summary: string; lines: { index: number; translation: string; notes: string[] }[] };
+type ClaudeOut = { summary: string; lines: { index: number; romanization: string; translation: string; notes: string[] }[] };
 
 let anthropic: Anthropic | null = null;
 function claude(): Anthropic {
@@ -54,11 +60,12 @@ function claude(): Anthropic {
 }
 
 /** The last line is the one the learner paused on; the voice explains only that one. */
-async function askClaude(lines: Line[], title: string, language: string | null): Promise<ClaudeOut> {
+async function askClaude(lines: Line[], title: string, language: string | null, background: string[]): Promise<ClaudeOut> {
   const last = lines.length - 1;
   const user = JSON.stringify({
     video: title,
     ...(language ? { language } : {}),
+    ...(background.length ? { background } : {}),
     context: lines.slice(0, last).map((l, index) => ({ index, text: l.text })),
     justSaid: { index: last, text: lines[last].text },
   });
@@ -139,19 +146,31 @@ export const extExplain: ExtExplain = async (req, res) => {
 
   await recordPause(videoId, t).catch((e) => console.error("[explain] moment", e));
 
+  // What was said before these lines (not shown or translated), so Claude knows the situation.
+  const earlier: { text: string; start: number }[] = fromSegments.length ? (video?.segments ?? []) : captionLines;
+  const background = earlier.filter((s) => s.start < lines[0].start).slice(-BACKGROUND_LINES).map((s) => s.text);
+
   const key = String(Math.round(t));
   const t0 = Date.now();
   let tClaude = 0;
   let explanation: Explanation;
   try {
-    const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId));
+    const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId), background);
     const byIndex = new Map(out.lines.map((l) => [l.index, l]));
     explanation = {
       summary: out.summary,
       audioUrl: null,
       lines: lines.map((l, i) => {
         const o = byIndex.get(i) ?? out.lines[i];
-        return { segmentId: l.segmentId, original: l.text, translation: o?.translation ?? "", notes: o?.notes ?? [] };
+        // Only lines that actually have non-Latin letters get one (the model may echo Latin lines).
+        const romanization = hasNonLatin(l.text) ? o?.romanization?.trim() : "";
+        return {
+          segmentId: l.segmentId,
+          original: l.text,
+          ...(romanization ? { romanization } : {}),
+          translation: o?.translation ?? "",
+          notes: o?.notes ?? [],
+        };
       }),
     };
     tClaude = Date.now() - t0;
@@ -164,7 +183,13 @@ export const extExplain: ExtExplain = async (req, res) => {
     }
     // No explanation of this exact line cached: show the lines with any translations we know.
     const tr = readTranslations(videoId);
-    const known = lines.map((l) => ({ segmentId: l.segmentId, original: l.text, translation: tr[l.segmentId]?.translation ?? "", notes: tr[l.segmentId]?.notes ?? [] }));
+    const known = lines.map((l) => ({
+      segmentId: l.segmentId,
+      original: l.text,
+      romanization: tr[l.segmentId]?.romanization,
+      translation: tr[l.segmentId]?.translation ?? "",
+      notes: tr[l.segmentId]?.notes ?? [],
+    }));
     const just = known[known.length - 1].translation;
     res.json({
       summary: just ? `I'm offline, but that line means: “${just}”` : "I'm offline right now, but here are the lines.",
@@ -187,7 +212,8 @@ export const extExplain: ExtExplain = async (req, res) => {
 
   // Persist: translations for /deck + /practice, and the explanation for offline fallback.
   const tr = readTranslations(videoId);
-  for (const l of explanation.lines) if (l.segmentId >= 0) tr[l.segmentId] = { translation: l.translation, notes: l.notes };
+  for (const l of explanation.lines)
+    if (l.segmentId >= 0) tr[l.segmentId] = { translation: l.translation, notes: l.notes, romanization: l.romanization };
   writeJson(translationsFile(videoId), tr);
   const cache = readJson<Cache>(cacheFile(videoId), {});
   cache[key] = explanation;

@@ -2,6 +2,7 @@
 // lines, "Hear it clearly" and hold-to-shadow (Task 3).
 // No innerHTML anywhere: YouTube enforces Trusted Types, so the DOM (and SVG) is built by hand.
 import type { Explanation, ShadowResult } from "./shared/types";
+import { nextVoiceRate, rateLabel } from "./voiceRate";
 
 export type Line = Explanation["lines"][number];
 
@@ -10,6 +11,7 @@ export type OverlayHandlers = {
   onShadowStart(line: Line, i: number): void;
   onShadowStop(line: Line, i: number): void;
   onClose(): void;
+  onVoiceRate(rate: number): void;
 };
 
 type Kid = Node | string | null | false | undefined;
@@ -25,6 +27,7 @@ const ICONS: Record<string, string> = {
   headphones: "M3 14v-2a9 9 0 0 1 18 0v2M3 14a2 2 0 0 1 2-2h1a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1H5a2 2 0 0 1-2-2v-4Zm18 0a2 2 0 0 0-2-2h-1a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1a2 2 0 0 0 2-2v-4Z",
   mic: "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Zm7 9a7 7 0 0 1-14 0m7 7v3",
   close: "M6 6l12 12M18 6L6 18",
+  gauge: "m12 14 4-4M3.34 19a10 10 0 1 1 17.32 0",
   wifiOff: "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.2-1.6M12 20h.01",
 };
 function icon(name: keyof typeof ICONS): SVGSVGElement {
@@ -73,6 +76,15 @@ const CSS = `
 .x { all: unset; cursor: pointer; width: 2em; height: 2em; display: grid; place-items: center; border-radius: 50%;
   color: var(--muted); transition: background .15s, color .15s; }
 .x:hover { background: rgba(255,255,255,.12); color: #fff; }
+/* Voice speed pill (header) */
+.speed { all: unset; cursor: pointer; flex: none; display: inline-flex; align-items: center; gap: .3em; padding: .35em .7em;
+  border-radius: 999px; font-size: .78em; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap;
+  background: rgba(255,255,255,.1); color: rgba(255,255,255,.88); transition: background .15s, color .15s, transform .1s; }
+.speed:hover { background: rgba(255,255,255,.2); color: #fff; }
+.speed:active { transform: scale(.95); }
+.speed:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.speed.custom { color: var(--accent-2); }
+.speed.changed { animation: pop .3s ease-out; }
 
 /* Mascot */
 .mascot { position: relative; flex: none; width: 3em; height: 3em; border-radius: 46% 46% 42% 42%;
@@ -107,6 +119,7 @@ const CSS = `
   display: flex; flex-direction: column; gap: .45em; animation: rise .35s cubic-bezier(.2,.8,.2,1) both; }
 .card.latest { background: rgba(255,138,92,.12); border-color: rgba(255,138,92,.35); }
 .es { font-size: 1.22em; font-weight: 700; line-height: 1.3; letter-spacing: -.005em; }
+.rom { color: #ffc9a8; font-size: .98em; font-weight: 500; letter-spacing: .01em; margin-top: -.15em; }
 .en { color: var(--muted); }
 .notes { display: flex; flex-wrap: wrap; gap: .35em; }
 .notes.folded { display: none; }
@@ -160,6 +173,7 @@ const CSS = `
 @keyframes wave { 0%, 100% { height: 25%; } 50% { height: 100%; } }
 @keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 @keyframes rise { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pop { 50% { transform: scale(1.12); background: rgba(255,138,92,.35); } }
 @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255,59,48,.55); } 100% { box-shadow: 0 0 0 12px rgba(255,59,48,0); } }
 `;
 
@@ -176,6 +190,8 @@ export class Overlay {
   private panel: HTMLDivElement | null = null;
   private mascot: HTMLDivElement | null = null;
   private top: HTMLDivElement | null = null;
+  private speedBtn: HTMLButtonElement | null = null;
+  private voiceRate = 1;
   private results: HTMLDivElement[] = [];
   private shadowBtns: HTMLButtonElement[] = [];
   private hearBtns: HTMLButtonElement[] = [];
@@ -260,11 +276,17 @@ export class Overlay {
     const close = h("button", "x", icon("close"));
     close.title = "Close (or press play)";
     close.addEventListener("click", () => this.handlers.onClose());
+    const speed = h("button", "speed");
+    speed.title = "Voice speed · click to change";
+    speed.addEventListener("click", () => this.handlers.onVoiceRate(nextVoiceRate(this.voiceRate)));
+    this.fillSpeed(speed);
+    this.speedBtn = speed;
     this.top = h(
       "div",
       "top",
       this.mascot,
       h("div", "who", h("div", "name", "Pausa", wave), h("div", "when", t === null ? "" : `Paused at ${fmt(t)}`)),
+      speed,
       close,
     );
     p.append(this.top);
@@ -335,6 +357,7 @@ export class Overlay {
         latest ? "card latest" : "card",
         latest && h("div", "tag", "Just said"),
         h("div", "es", line.original),
+        line.romanization && h("div", "rom", line.romanization),
         line.translation && h("div", "en", line.translation),
         notes,
         actions.childElementCount > 0 && actions,
@@ -348,6 +371,24 @@ export class Overlay {
       body.append(c);
     });
     p.append(body);
+  }
+
+  /** The speed shown in the header pill. Pops when it changes. */
+  setVoiceRate(rate: number): void {
+    const changed = rate !== this.voiceRate;
+    this.voiceRate = rate;
+    if (this.speedBtn) this.fillSpeed(this.speedBtn, changed);
+  }
+
+  private fillSpeed(b: HTMLButtonElement, pop = false): void {
+    b.replaceChildren(icon("gauge"), rateLabel(this.voiceRate));
+    b.classList.toggle("custom", this.voiceRate !== 1);
+    b.setAttribute("aria-label", `Voice speed ${rateLabel(this.voiceRate)}`);
+    if (pop) {
+      b.classList.remove("changed");
+      void b.offsetWidth; // restart the animation
+      b.classList.add("changed");
+    }
   }
 
   speaking(on: boolean): void {
@@ -415,6 +456,7 @@ export class Overlay {
     this.panel = null;
     this.mascot = null;
     this.top = null;
+    this.speedBtn = null;
     this.scrim?.classList.remove("on");
     if (p) {
       p.classList.remove("on");

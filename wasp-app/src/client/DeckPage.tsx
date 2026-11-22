@@ -40,6 +40,7 @@ export function DeckPage() {
             rel="noreferrer"
           >
             <div className="line-es">{c.text}</div>
+            {c.romanization && <div className="line-rom">{c.romanization}</div>}
             {c.translation && <div className="line-en">{c.translation}</div>}
             {c.notes.length > 0 && (
               <ul className="notes">

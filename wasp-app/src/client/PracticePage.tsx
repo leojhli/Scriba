@@ -115,6 +115,7 @@ export function PracticePage() {
 
       <section className="practice">
         <div className="line-es big">{card.text}</div>
+        {card.romanization && <div className="line-rom big">{card.romanization}</div>}
         {card.translation ? <div className="line-en">{card.translation}</div> : <div className="line-en muted">(no translation yet)</div>}
 
         <div className="row">

@@ -12,6 +12,8 @@ export type DeckCard = {
   videoTitle: string;
   segmentId: number;
   text: string;
+  /** Latin-letter reading for non-Latin scripts (pinyin, romaji…), else "". */
+  romanization: string;
   start: number;
   end: number;
   translation: string;
@@ -52,6 +54,7 @@ export const getDeck: GetDeck<void, DeckCard[]> = async (_args, context) => {
       videoTitle: video.title,
       segmentId: g.segmentId,
       text: seg.text,
+      romanization: tr?.romanization ?? "",
       start: seg.start,
       end: seg.end,
       translation: tr?.translation ?? "",

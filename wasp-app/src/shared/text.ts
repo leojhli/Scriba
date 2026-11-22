@@ -34,3 +34,8 @@ const SPOKEN_ROMANIZATION = /\s*[（(][^)）]*[āáǎàēéěèīíǐìōóǒò�
 export function spokenText(summary: string): string {
   return summary.replace(SPOKEN_ROMANIZATION, "").replace(/\s+([,.;:!?])/g, "$1").trim();
 }
+
+/** True if the text has letters outside the Latin script (Han, Kana, Hangul, Cyrillic…): those lines get a romanization. */
+export function hasNonLatin(s: string): boolean {
+  return /(?!\p{Script=Latin})\p{L}/u.test(s);
+}

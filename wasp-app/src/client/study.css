@@ -17,6 +17,8 @@
 .card:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,.08); }
 .line-es { font-size: 18px; font-weight: 650; }
 .line-es.big { font-size: 26px; }
+.line-rom { color: #b4532a; font-size: 15px; margin-top: 2px; }
+.line-rom.big { font-size: 19px; }
 .line-en { color: #444; margin-top: 4px; }
 .notes { margin: 8px 0 0; padding-left: 18px; color: #555; font-size: 14px; }
 .meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }

@@ -7,6 +7,7 @@ import { DIALOGUE_POLL_MS, HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config
 import type { Explanation, Segment, ShadowResult } from "./shared/types";
 import { window as segWindow } from "./shared/window";
 import { isAdShowing, watchAds, watchPlayback } from "./signals";
+import { loadVoiceRate, onVoiceRateChange, rateLabel, saveVoiceRate } from "./voiceRate";
 
 type Session = { status: "processing" | "ready" | "failed"; segments: Segment[] | null; hasDialogue: boolean };
 
@@ -22,10 +23,11 @@ let explainSeq = 0;
 let speech: HTMLAudioElement | null = null;
 let clip: HTMLAudioElement | null = null;
 let shadowStart: Promise<boolean> | null = null;
+let voiceRate = 1;
 
 const captions = new CaptionBuffer();
 const recorder = new Recorder();
-const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose });
+const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose, onVoiceRate });
 let clipIndex = -1;
 
 function player(): HTMLVideoElement | null {
@@ -147,11 +149,31 @@ async function explain(video: HTMLVideoElement): Promise<void> {
     const url = await mediaUrl(e.audioUrl);
     if (!url || seq !== explainSeq || isAdShowing()) return;
     stopAudio();
-    speech = new Audio(url);
-    speech.onplay = () => overlay.speaking(true);
-    speech.onpause = speech.onended = () => overlay.speaking(false);
-    speech.play().catch((err) => log("voice blocked", err));
+    const s = new Audio(url);
+    speech = s;
+    s.preservesPitch = true;
+    s.defaultPlaybackRate = s.playbackRate = voiceRate;
+    s.onplay = () => overlay.speaking(true);
+    s.onpause = s.onended = () => overlay.speaking(false);
+    s.addEventListener("playing", () => log(`voice: ${s.duration.toFixed(1)}s of audio at ${rateLabel(s.playbackRate)}`), { once: true });
+    s.play().catch((err) => log("voice blocked", err));
   }
+}
+
+// ---------- Voice speed (the pill in the panel header) ----------
+
+/** Applies at once, even mid-sentence, and is saved for every video and tab. */
+function onVoiceRate(rate: number): void {
+  applyVoiceRate(rate);
+  saveVoiceRate(rate);
+}
+
+function applyVoiceRate(rate: number): void {
+  if (rate === voiceRate) return;
+  voiceRate = rate;
+  overlay.setVoiceRate(rate);
+  if (speech) speech.defaultPlaybackRate = speech.playbackRate = rate;
+  log(`voice speed ${rateLabel(rate)}`);
 }
 
 function stopAudio(): void {
@@ -275,6 +297,8 @@ watchAds((ad) => {
   overlay.setHidden(ad);
 });
 captions.start();
+void loadVoiceRate().then(applyVoiceRate);
+onVoiceRateChange(applyVoiceRate);
 document.addEventListener("yt-navigate-finish", onNavigate);
 window.addEventListener("popstate", onNavigate);
 onNavigate();

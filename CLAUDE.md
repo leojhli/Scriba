@@ -68,8 +68,17 @@ The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** 
 - **Detection:** Scribe auto-detects the language per video. It is saved as `language` in `data/{id}/video.json` and reused when transcribing shadowing attempts.
 - **Chinese and Japanese text:** `src/shared/text.ts` joins words without spaces between Han/Kana characters. `src/shared/segments.ts` splits lines at 。！？ as well as .?!, at pauses over 0.8 s, and at a comma once a line is already 6 s long (lyrics).
 - **Scoring:** `normalize()` tokenizes Han/Kana per character, so Chinese and Japanese are scored per character.
-- **Tutor prompt:** language-neutral. It writes English translations, adds pinyin or romaji for Chinese and Japanese, and gives the spoken summary in English.
+- **Tutor prompt:** language-neutral. It writes English translations and gives the spoken summary in English.
+- **Romanization (added 2026-11-22):** for any line with non-Latin letters (`hasNonLatin()` in `src/shared/text.ts`), Claude returns the whole line in Latin letters (Hanyu Pinyin with tone marks, Hepburn romaji, Revised Romanization, else a standard transliteration) in the same explain call. It's saved in `translations.json` next to the translation, and shown under the line in the overlay, `/deck` and `/practice`. Lines explained before this were backfilled once. Claude writes it, so the occasional word is off (one Korean slip in testing).
 - **Verified end to end:** Spanish (`aUGOFL0Ygsw`) and Mandarin (`YCIFNPMu0hs`; the explanation came back in 7 s with pinyin notes).
+
+## Explanations in context (decided 2026-11-22)
+
+The voice explains **the line just said, at that moment in the video**: what it means there (who it's aimed at, what it refers to, the joke, feeling or subtext), plus the one thing worth learning. A quick bit of plot recap to set it up is fine (user's call), but no overview of the whole video or song. Claude also gets `background`: up to 20 earlier lines (never later ones) plus the title, which it reads but doesn't translate. The summary limit is 45 words.
+
+**Cost:** romanization and context made Claude ~1.5 s slower (4.9–5.8 s), so a pause now takes ~5.5–7 s in total. Streaming the summary first (option 1 or 2 under "Explain latency") would win that back.
+
+**Voice speed:** the pill next to the × in the panel header cycles 0.75× → 1× → 1.25× → 1.5× → 2× (`extension/src/voiceRate.ts`). It applies at once, even mid-sentence, with pitch preserved, and is saved in `chrome.storage.local`, so it carries over to every video and tab. Each tab tags its own writes so a late storage echo can't undo a newer click.
 
 ## Scope decision: pause is the only signal
 
@@ -191,7 +200,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 ```ts
 export type Segment = { id: number; start: number; end: number; text: string }
 export type Explanation = { summary: string; audioUrl: string | null;
-  lines: { segmentId: number; original: string; translation: string; notes: string[] }[];
+  lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
   offline?: boolean }
 export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number }
 ```

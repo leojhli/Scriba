@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { joinWords, SENTENCE_END, tidyText, tokenize } from "./text";
+import { hasNonLatin, joinWords, SENTENCE_END, tidyText, tokenize } from "./text";
 
 describe("joinWords", () => {
   it("joins Spanish words with spaces and no space before punctuation", () => {
@@ -32,5 +32,21 @@ describe("SENTENCE_END", () => {
 describe("tokenize", () => {
   it("splits CJK per character and Latin per word", () => {
     expect(tokenize("你好，iPhone 不错！")).toEqual(["你", "好", "iphone", "不", "错"]);
+  });
+});
+
+describe("hasNonLatin", () => {
+  it("is false for Latin-script lines, accents and punctuation included", () => {
+    expect(hasNonLatin("¿Quieres ser un perro de trineo?")).toBe(false);
+    expect(hasNonLatin("Ma meilleure ennemie, ça va ?")).toBe(false);
+    expect(hasNonLatin("Hi, welcome to Street Talk。Today we are in China")).toBe(false);
+  });
+
+  it("is true for Chinese, Japanese, Korean and other scripts", () => {
+    expect(hasNonLatin("我姓高。")).toBe(true);
+    expect(hasNonLatin("ありがとう")).toBe(true);
+    expect(hasNonLatin("사랑을 했다")).toBe(true);
+    expect(hasNonLatin("Привет")).toBe(true);
+    expect(hasNonLatin("OK, 好不好？")).toBe(true);
   });
 });
