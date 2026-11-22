@@ -8,22 +8,30 @@ Making study material from media is work learners do by hand today: pausing, loo
 
 This file is the implementation plan (v3), updated to match what's built. The **Interfaces** section is a contract between four people: don't change it without telling the team. **To run the demo, see [DEMO.md](DEMO.md).**
 
-## Status (2026-11-22, ~12:00)
+## Status (2026-11-22, ~12:10)
+
+All tasks are built. **Verified end to end in real Chrome on a real Spanish video** (`aUGOFL0Ygsw`):
+- ingest: 62 s, 11 segments, dialogue isolated
+- pause: explanation + translations in ~5.5 s, and the mascot voice plays
+- Hear it clearly: mutes YouTube, plays the isolated clip at 0.75×, then unmutes
+- the deck lists the paused line
+
+Not verified: shadowing with a real microphone (needs a human), and the /practice page in a browser.
 
 | Task | State |
 |---|---|
-| 0 Skeletons | ✅ done |
-| 1 Ingest + session | ✅ built; yt-dlp + ffmpeg verified live. **Needs `ELEVENLABS_API_KEY`** for Scribe + Isolator |
-| 2 Struggle detection | ❌ **removed by decision**: pause is the only signal (see below) |
-| 3 Overlay + pause flow | ✅ built (`window()` tested) |
-| 4 Explanation + voice | ✅ built; endpoint + fallbacks verified. **Needs `ANTHROPIC_API_KEY`** + ElevenLabs key |
-| 5 Hear it clearly | ✅ built |
-| 6 Shadowing | ✅ built (`score()` tested; silent attempt → 0, verified) |
-| 7 Deck + practice | ✅ built; `getDeck` verified |
-| 8 Unbreakable demo | ✅ server + extension caches, offline chip, `npm run cache:export`, `wasp db seed`. **Still to do:** process + export the 2 demo videos |
-| 9 Submission | README done; video, screenshots, diagram still to do |
+| 0 Skeletons | ✅ |
+| 1 Ingest + session | ✅ verified live |
+| 2 Struggle detection | ❌ removed by decision: pause is the only signal (see below) |
+| 3 Overlay + pause flow | ✅ verified live |
+| 4 Explanation + voice | ✅ verified live (Claude ~4 s + TTS ~1 s; explain timeout 15 s, last 3 lines only) |
+| 5 Hear it clearly | ✅ verified live |
+| 6 Shadowing | ✅ built; scoring unit-tested; mic flow untested |
+| 7 Deck + practice | ✅ built; getDeck verified |
+| 8 Unbreakable demo | ✅ caches + offline chip; `demo-cache/aUGOFL0Ygsw` exported. Still to do: a 2nd demo video |
+| 9 Submission | README done; video + screenshots still to do |
 
-Not yet tested in a real Chrome session with API keys: the overlay on youtube.com, voice playback, the mic, and Voice Isolator output.
+**Demo Chrome window:** Chrome 157 ignores `--load-extension`, so the demo profile (`.chrome-demo-profile/`, gitignored) is launched with `--enable-unsafe-extension-debugging --remote-debugging-port=9333`, and the extension is loaded via the CDP call `Extensions.loadUnpacked`. Or just use "Load unpacked" in normal Chrome.
 
 ## Scope decision: pause is the only signal
 

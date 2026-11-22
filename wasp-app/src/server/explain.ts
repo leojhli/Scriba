@@ -12,7 +12,8 @@ import { readJson, videoDir, writeJson } from "./paths";
 import { getVideo, readTranslations, translationsFile } from "./videos";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
-const CLAUDE_TIMEOUT_MS = 5500; // leaves room for TTS inside the extension's 8 s budget
+const CLAUDE_TIMEOUT_MS = 10_000; // ~4 s typical for 3 lines; TTS adds ~1 s (extension waits 15 s)
+const MAX_LINES = 3; // the last few lines keep it fast and focused
 
 const LANGUAGE_NAMES: Record<string, string> = { es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ja: "Japanese" };
 
@@ -110,6 +111,7 @@ export const extExplain: ExtExplain = async (req, res) => {
   const lines: Line[] = video?.segments
     ? segWindow(video.segments, t).map((s) => ({ segmentId: s.id, text: s.text, start: s.start, end: s.end }))
     : segWindow(captionLines, t).map((c) => ({ segmentId: -1, text: c.text, start: c.start, end: c.end }));
+  lines.splice(0, Math.max(0, lines.length - MAX_LINES));
 
   if (!lines.length) {
     const processing = !video || video.status === "processing";

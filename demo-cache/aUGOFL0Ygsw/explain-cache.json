@@ -1,0 +1,35 @@
+{
+  "101": {
+    "summary": "In this playful clip, a man jokes with his dog about who is slow, then teases that he'll build a sled so the dog can pull him. It's a lighthearted, bantering moment between a man and his dog.",
+    "audioUrl": "/media/aUGOFL0Ygsw/explain-101.mp3",
+    "lines": [
+      {
+        "segmentId": 5,
+        "original": "¿Yo soy el lento?",
+        "translation": "I'm the slow one?",
+        "notes": [
+          "Said in mock offense, as if the dog had just called him slow; the tone is playful, not angry.",
+          "'Ser' + adjective ('soy el lento') describes a defining trait, here jokingly."
+        ]
+      },
+      {
+        "segmentId": 6,
+        "original": "Okey, entonces mañana voy a construir un trineo para que me lleves.",
+        "translation": "Okay, then tomorrow I'm going to build a sled for you to pull me.",
+        "notes": [
+          "'Voy a + infinitive' is the common way to talk about near-future plans ('voy a construir' = 'I'm going to build').",
+          "'Para que me lleves' uses the subjunctive after 'para que' (purpose); 'llevar' here means 'to carry/take' me."
+        ]
+      },
+      {
+        "segmentId": 7,
+        "original": "¿Quieres ser un perro de trineo?",
+        "translation": "Do you want to be a sled dog?",
+        "notes": [
+          "Another character teases by picking up on the joke; 'perro de trineo' literally means 'dog of sled', the standard way to say 'sled dog'.",
+          "'Quieres ser...' = 'you want to be...'; 'querer' + infinitive is a very useful everyday pattern."
+        ]
+      }
+    ]
+  }
+}

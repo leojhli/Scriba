@@ -11,6 +11,8 @@ export const DEMO_KEY = "pause-and-effect-demo";
 export const REQUEST_TIMEOUT_MS = 8000;
 // Shadow scoring runs Scribe on the recording, so it gets a little longer.
 export const SHADOW_TIMEOUT_MS = 15000;
+// Claude (~4 s) + TTS (~1 s); the bubble shows "thinking…" meanwhile.
+export const EXPLAIN_TIMEOUT_MS = 15000;
 export const MEDIA_TIMEOUT_MS = 15000;
 
 export const SESSION_POLL_MS = 5000;
