@@ -1,0 +1,54 @@
+app PauseAndEffect {
+  wasp: {
+    version: "^0.22.0"
+  },
+  title: "Pause & Effect",
+  head: [
+    "<link rel='icon' href='/favicon.ico' />",
+  ],
+  auth: {
+    userEntity: User,
+    methods: {
+      usernameAndPassword: {},
+    },
+    onAuthFailedRedirectTo: "/login",
+    onAuthSucceededRedirectTo: "/deck",
+  },
+}
+
+// ---------- Pages ----------
+
+route RootRoute { path: "/", to: MainPage }
+page MainPage {
+  component: import { MainPage } from "@src/client/MainPage"
+}
+
+route LoginRoute { path: "/login", to: LoginPage }
+page LoginPage {
+  component: import { LoginPage } from "@src/client/auth/AuthPages"
+}
+
+route SignupRoute { path: "/signup", to: SignupPage }
+page SignupPage {
+  component: import { SignupPage } from "@src/client/auth/AuthPages"
+}
+
+// Study program (Task 7)
+route DeckRoute { path: "/deck", to: DeckPage }
+page DeckPage {
+  component: import { DeckPage } from "@src/client/DeckPage"
+}
+
+route PracticeRoute { path: "/practice", to: PracticePage }
+page PracticePage {
+  component: import { PracticePage } from "@src/client/PracticePage"
+}
+
+// ---------- Extension API (called only from the extension's background worker) ----------
+// All ext* routes: POST + JSON, auth: false, guarded by the x-demo-key header.
+
+api extPing {
+  fn: import { extPing } from "@src/server/ping",
+  httpRoute: (POST, "/ext/ping"),
+  auth: false
+}

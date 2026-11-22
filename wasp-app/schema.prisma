@@ -1,0 +1,47 @@
+datasource db {
+  provider = "sqlite"
+  // Wasp requires that the url is set to the DATABASE_URL environment variable.
+  url      = env("DATABASE_URL")
+}
+
+// Wasp requires the `prisma-client-js` generator to be present.
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id       Int             @id @default(autoincrement())
+  moments  Moment[]
+  attempts ShadowAttempt[]
+}
+
+model Video {
+  id          String   @id
+  title       String
+  status      String // "processing" | "ready"
+  hasDialogue Boolean
+  segments    String? // JSON.stringify(Segment[]) — SQLite + Prisma 5 has no Json type
+  createdAt   DateTime @default(now())
+}
+
+model Moment {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  videoId   String
+  segmentId Int
+  kind      String
+  weight    Int
+  createdAt DateTime @default(now())
+}
+
+model ShadowAttempt {
+  id        Int      @id @default(autoincrement())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  videoId   String
+  segmentId Int
+  accuracy  Float
+  paceRatio Float
+  createdAt DateTime @default(now())
+}

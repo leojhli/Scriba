@@ -1,0 +1,17 @@
+{
+  "name": "pause-and-effect-extension",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/content.ts src/background.ts --bundle --outdir=dist",
+    "watch": "esbuild src/content.ts src/background.ts --bundle --outdir=dist --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.7",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}
