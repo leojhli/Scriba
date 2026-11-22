@@ -23,7 +23,8 @@ let shadowStart: Promise<boolean> | null = null;
 
 const captions = new CaptionBuffer();
 const recorder = new Recorder();
-const overlay = new Overlay({ onHear, onShadowStart, onShadowStop });
+const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose });
+let clipIndex = -1;
 
 function player(): HTMLVideoElement | null {
   return document.querySelector<HTMLVideoElement>("#movie_player video");
@@ -97,7 +98,7 @@ async function explain(video: HTMLVideoElement): Promise<void> {
   if (!videoId) return;
   const seq = ++explainSeq;
   const t = video.currentTime;
-  overlay.thinking();
+  overlay.thinking(t);
   const captionLines = captions.snapshot(t);
   const res = await api<Explanation>("/ext/explain", {
     videoId,
@@ -124,7 +125,7 @@ async function explain(video: HTMLVideoElement): Promise<void> {
   overlay.explanation(e, {
     hear: (line) => !!session?.hasDialogue && !!segment(line.segmentId),
     shadow: (line) => !!line.original,
-  });
+  }, t);
 
   if (e.audioUrl) {
     const url = await mediaUrl(e.audioUrl);
@@ -146,12 +147,21 @@ function stopAudio(): void {
     const v = player();
     if (v) v.muted = false;
   }
+  if (clipIndex >= 0) overlay.hearing(clipIndex, false);
+  clipIndex = -1;
   overlay.speaking(false);
+}
+
+/** The × on the panel: dismiss without resuming the video. */
+function onClose(): void {
+  explainSeq++;
+  stopAudio();
+  overlay.hideBubble();
 }
 
 // ---------- "Hear it clearly" (Task 5) ----------
 
-async function onHear(line: Line): Promise<void> {
+async function onHear(line: Line, i: number): Promise<void> {
   const seg = segment(line.segmentId);
   if (!videoId || !seg) return;
   stopAudio();
@@ -164,6 +174,8 @@ async function onHear(line: Line): Promise<void> {
   if (v) v.muted = true;
   const a = new Audio(url);
   clip = a;
+  clipIndex = i;
+  overlay.hearing(i, true);
   a.preservesPitch = true;
   a.addEventListener(
     "loadedmetadata",
@@ -177,7 +189,11 @@ async function onHear(line: Line): Promise<void> {
   a.addEventListener("timeupdate", () => {
     if (a.currentTime >= seg.end + 0.2) {
       a.pause();
-      if (clip === a) clip = null;
+      if (clip === a) {
+        clip = null;
+        clipIndex = -1;
+        overlay.hearing(i, false);
+      }
       if (v) v.muted = false;
     }
   });

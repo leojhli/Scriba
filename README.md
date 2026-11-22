@@ -4,6 +4,8 @@
 
 Learners turn shows into study material by hand: pause, look it up, make flashcards, find practice. Pause & Effect is a Chrome extension plus a Wasp app that does all of it while you watch Spanish YouTube.
 
+![Pause & Effect overlay on a paused YouTube video](docs/overlay.png)
+
 ## The pipeline
 
 1. **Watches alongside you.** When a video opens, the server downloads the first 3 minutes (yt-dlp), transcribes it with **ElevenLabs Scribe** (word timestamps) and separates the dialogue with **ElevenLabs Voice Isolator**. The extension also reads the on-screen captions live.
