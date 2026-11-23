@@ -1,15 +1,30 @@
-# Pause & Effect
+<img src="extension/assets/scriba-inu.png" alt="Scriba Inu, a shiba with a scroll in its mouth" width="120" align="right">
+
+# Scriba
 
 **You just watch. It builds your study program.**
 
-Learners turn shows into study material by hand: pause, look it up, make flashcards, find practice. Pause & Effect is a Chrome extension plus a Wasp app that does all of it while you watch YouTube in the language you're learning. The language is auto-detected (tested with Spanish and Mandarin).
+Learners turn shows into study material by hand: pause, look it up, make flashcards, find practice. Scriba (formerly *Pause & Effect*) is a Chrome extension plus a Wasp app that does all of it while you watch YouTube in the language you're learning. The language is auto-detected (tested with Spanish and Mandarin).
 
-![Pause & Effect overlay on a paused YouTube video](docs/overlay.png)
+![Scriba on a paused YouTube video](docs/overlay.png)
+
+## The UI
+
+Everything is drawn in a hand-sketched, paper-and-pencil style around the mascot, **Scriba Inu**.
+
+- **The scroll sidebar.** Pause and a translucent paper scroll (rolled ends, a red ribbon bookmark, pencil-sketch edges, handwritten labels) slides in on the right of the video. Top to bottom it shows:
+  - Scriba Inu with the spoken note (click to expand), plus the voice-speed pill (0.75×–2×) and ×.
+  - **Just said:** the line, its romanization and translation, **Hear it clearly** and **Hold to shadow**, and notes.
+  - The line before it, then **Deck**, **Practice** and **Keep watching**.
+- **Paper field.** Behind the scroll text, scraps of paper carrying the paused line's characters or words drift up faintly (three.js, loaded only when the scroll first opens).
+- **Stays out of the way.** The scroll sits under YouTube's control bar, so the controls and fullscreen still work. Click the video or press Space/K to keep watching; Esc closes without resuming.
+- **Pencil look everywhere.** Outlines wobble through SVG noise filters and orange buttons get a hatched marker fill. The web app's `/`, `/deck` and `/practice` pages use the same paper desk, sketched slips and scroll, with a score ring on Practice.
+- **Toolbar button** opens your deck.
 
 ## The pipeline
 
 1. **Watches alongside you.** When a video opens, the server downloads the first 3 minutes (yt-dlp), transcribes it with **ElevenLabs Scribe** (language auto-detected, word timestamps) and separates the dialogue with **ElevenLabs Voice Isolator**. The extension also reads the on-screen captions live.
-2. **Explains on pause.** Pause and a mascot appears over the video. **Claude** translates the last few lines and adds notes on slang, grammar and the scene, and **ElevenLabs TTS** reads the summary aloud.
+2. **Explains on pause.** Pause and the Scriba scroll slides in. **Claude** translates the last few lines and adds notes on slang, grammar and the scene, and **ElevenLabs TTS** reads the summary aloud.
 3. **Builds your deck.** Every line you paused on becomes a card at `/deck`, ranked by how often you stopped there.
 4. **Turns it into practice.** *Hear it clearly* plays just the voice (music removed) at 0.75×. *Shadowing*: say the line, and Scribe scores you word by word with a coloured diff and pace.
 
@@ -17,7 +32,8 @@ Learners turn shows into study material by hand: pause, look it up, make flashca
 
 ```
 YouTube tab
-  └─ content script (captions buffer, pause/play, shadow-DOM overlay, mic recorder)
+  └─ content script (captions buffer, pause/play, shadow-DOM scroll sidebar, mic recorder)
+       └─ fx.js (three.js paper field, lazy-loaded on first open)
        └─ background service worker (all fetches, 8 s timeouts, offline cache)
             └─ Wasp server :3001
                  ├─ /ext/session → yt-dlp → ffmpeg → Scribe + Voice Isolator
