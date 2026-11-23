@@ -96,6 +96,35 @@ function sketchDefs(): SVGSVGElement {
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const MASCOT = () => chrome.runtime.getURL("assets/scriba-inu.png");
+
+// Extra poses. The SVGs in assets/ are placeholders: when the artist's PNG with the same name is
+// dropped in (assets/scriba-sleeping.png, assets/scriba-listening.png), it's used instead, with no
+// code change. See docs/mascot/README.md.
+export type Pose = "default" | "sleeping" | "listening";
+const POSE_ALT: Record<Pose, string> = {
+  default: "Scriba, a shiba inu holding a scroll",
+  sleeping: "Scriba asleep beside its scroll",
+  listening: "Scriba listening, ears up",
+};
+const poseFile = new Map<Pose, string>(); // which file worked, so later swaps don't flicker
+function setPose(img: HTMLImageElement, pose: Pose): void {
+  img.alt = POSE_ALT[pose];
+  img.dataset.pose = pose;
+  if (pose === "default") {
+    img.onerror = null;
+    img.src = MASCOT();
+    return;
+  }
+  const known = poseFile.get(pose);
+  const png = chrome.runtime.getURL(`assets/scriba-${pose}.png`);
+  const svg = chrome.runtime.getURL(`assets/scriba-${pose}.svg`);
+  img.onload = () => poseFile.set(pose, img.src);
+  img.onerror = () => {
+    img.onerror = null;
+    if (img.dataset.pose === pose) img.src = svg; // no artist PNG yet
+  };
+  img.src = known ?? png;
+}
 const NON_LATIN = /(?!\p{Script=Latin})\p{L}/u;
 
 /** What floats on the paper scraps: the line's characters (CJK etc.) or its words (Latin). */
@@ -160,6 +189,11 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
 .dog { flex: none; width: 3.9em; height: auto; transform-origin: 50% 92%; animation: bob 2.6s ease-in-out infinite alternate; }
 .dog.thinking { animation: tilt 1.3s ease-in-out infinite; }
 .dog.speaking { animation: talk .32s ease-in-out infinite alternate; }
+/* Nothing to explain: Scriba sleeps in the middle of the scroll, the message under it, nothing else */
+.body.asleep .say { flex-direction: column; align-items: center; text-align: center; gap: .5em; margin-block: auto; }
+.body.asleep .dog { width: min(10em, 80%); transform-origin: 50% 100%; animation: breathe 3.4s ease-in-out infinite; }
+.body.asleep .summary { -webkit-line-clamp: unset; max-width: 22em; cursor: default; }
+.body.asleep .rule, .body.asleep .focus { display: none; }
 .summary { font-family: var(--hand); font-size: .93em; line-height: 1.5; padding-top: .1em; cursor: pointer;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 5; overflow: hidden; }
 .summary.full { -webkit-line-clamp: unset; }
@@ -263,6 +297,7 @@ a.btn { text-decoration: none; }
   .foot .label, .when { display: none; }
 }
 
+@keyframes breathe { 50% { transform: scale(1.02, 1.04); } }
 @keyframes bob { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-6%) rotate(2deg); } }
 @keyframes talk { from { transform: translateY(0) scale(1, 1); } to { transform: translateY(-6%) scale(1.04, .96); } }
 @keyframes tilt { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
@@ -292,6 +327,7 @@ export class Overlay {
   private summaryEl: HTMLDivElement | null = null;
   private focusEl: HTMLDivElement | null = null;
   private dog: HTMLImageElement | null = null;
+  private bodyEl: HTMLDivElement | null = null;
   private speedBtn: HTMLButtonElement | null = null;
   private offlineTag: HTMLSpanElement | null = null;
   private results: HTMLDivElement[] = [];
@@ -457,8 +493,7 @@ export class Overlay {
     const head = h("div", "head", face, h("span", "name", "Scriba"), h("span", "when", t === null ? "" : `paused at ${fmt(t)}`), this.offlineTag, speed, close);
 
     this.dog = h("img", "dog");
-    this.dog.src = MASCOT();
-    this.dog.alt = "Scriba, a shiba inu holding a scroll";
+    setPose(this.dog, "default");
     this.summaryEl = h("div", "summary");
     this.summaryEl.title = "Click to show all";
     const summary = this.summaryEl;
@@ -466,6 +501,7 @@ export class Overlay {
     this.sayEl = h("div", "say", this.dog, this.summaryEl);
     this.focusEl = h("div", "focus");
     const body = h("div", "body", this.sayEl, squiggle(), this.focusEl);
+    this.bodyEl = body;
 
     const link = (path: string, ico: keyof typeof ICONS, label: string, tip: string) => {
       const a = h("a", "btn", icon(ico), h("span", "label", label));
@@ -508,9 +544,16 @@ export class Overlay {
     this.focusEl?.replaceChildren(h("div", "skel", h("div", "sk w60"), h("div", "sk w80"), h("div", "sk w40")));
   }
 
-  explanation(e: Explanation, can: { hear(line: Line): boolean; shadow(line: Line): boolean }, t: number | null = null): void {
+  /**
+   * `asleep`: nothing has been said to explain. Scriba sleeps, centred and bigger, with the
+   * message under it, and the divider and line area go away.
+   */
+  explanation(e: Explanation, can: { hear(line: Line): boolean; shadow(line: Line): boolean; asleep?: boolean }, t: number | null = null): void {
     if ((!this.open || !this.focusEl) && !this.build(t)) return;
     this.dog?.classList.remove("thinking");
+    const asleep = !!can.asleep && !e.lines.length;
+    this.bodyEl?.classList.toggle("asleep", asleep);
+    if (this.dog) setPose(this.dog, asleep ? "sleeping" : "default");
     this.summaryEl?.classList.toggle("muted", !e.lines.length);
     this.summaryEl?.replaceChildren(e.summary, h("span", "wave", h("i"), h("i"), h("i"), h("i")));
     this.results = [];
@@ -650,6 +693,8 @@ export class Overlay {
 
   shadowState(i: number, state: "recording" | "scoring" | "idle"): void {
     const btn = this.shadowBtns[i];
+    // Scriba listens while you say the line.
+    if (this.dog && !this.bodyEl?.classList.contains("asleep")) setPose(this.dog, state === "recording" ? "listening" : "default");
     clearInterval(this.recTimer);
     if (btn) {
       btn.classList.toggle("rec", state === "recording");
@@ -711,6 +756,7 @@ export class Overlay {
     this.sayEl = null;
     this.summaryEl = null;
     this.focusEl = null;
+    this.bodyEl = null;
     this.speedBtn = null;
   }
 }

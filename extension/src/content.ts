@@ -152,6 +152,8 @@ async function explain(video: HTMLVideoElement): Promise<void> {
   overlay.explanation(e, {
     hear: (line) => !!session?.hasDialogue && !!segment(line.segmentId),
     shadow: (line) => !!line.original,
+    // No lines and not "Still listening…" (the server says that while processing with no captions).
+    asleep: !((!session || session.status === "processing") && !captionLines.length),
   }, t);
 
   if (e.audioUrl) {

@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="64 26 300 272" width="300" height="272">
+  <!-- Scriba Inu listening while you shadow: ears up, eyes open, head tilted, scroll still in its
+       mouth. Framed like scriba-inu.png. Placeholder for the artist's scriba-listening.png
+       (see docs/mascot/README.md). -->
+  <defs>
+    <clipPath id="lhead"><path d="M105 175C105 125 140 100 185 100C230 100 265 125 265 175C268 200 276 214 268 232C255 258 222 268 185 268C148 268 115 258 102 232C94 214 102 200 105 175Z"/></clipPath>
+  </defs>
+  <g stroke="#1e1b19" stroke-linecap="round" stroke-linejoin="round">
+    <!-- sound arriving at the ear -->
+    <g fill="none" stroke-width="4.5" opacity=".75">
+      <path d="M300 92Q314 108 302 126"/>
+      <path d="M318 78Q342 108 322 140"/>
+    </g>
+
+    <g transform="rotate(9 185 185)">
+      <!-- ears, perked up -->
+      <path d="M113 150C104 106 112 70 126 50C148 58 172 84 184 104Z" fill="#ffa33c" stroke-width="5"/>
+      <path d="M123 128C118 104 122 82 130 70C143 78 156 94 164 108Z" fill="#fdf4e4" stroke="none"/>
+      <path d="M126 122C126 108 130 96 136 92C146 98 150 108 150 118Z" fill="#e6d5b4" stroke="none"/>
+      <path d="M257 150C266 106 258 70 244 50C222 58 198 84 186 104Z" fill="#ffa33c" stroke-width="5"/>
+      <path d="M247 128C252 104 248 82 240 70C227 78 214 94 206 108Z" fill="#fdf4e4" stroke="none"/>
+      <path d="M244 122C244 108 240 96 234 92C224 98 220 108 220 118Z" fill="#e6d5b4" stroke="none"/>
+
+      <!-- head -->
+      <g clip-path="url(#lhead)">
+        <rect x="90" y="90" width="190" height="190" fill="#ffa33c" stroke="none"/>
+        <path d="M232 112C252 130 262 160 262 196" fill="none" stroke="#ee9a33" stroke-width="12" opacity=".8"/>
+        <path d="M88 204C122 192 156 198 172 206C180 200 190 200 198 206C214 198 248 192 282 204V285H88Z" fill="#fff6ea" stroke="none"/>
+        <path d="M120 256C150 266 220 266 250 256" fill="none" stroke="#e6d5b4" stroke-width="8"/>
+      </g>
+      <path d="M105 175C105 125 140 100 185 100C230 100 265 125 265 175C268 200 276 214 268 232C255 258 222 268 185 268C148 268 115 258 102 232C94 214 102 200 105 175Z" fill="none" stroke-width="5"/>
+
+      <!-- brow dots, raised: paying attention -->
+      <ellipse cx="154" cy="144" rx="7.5" ry="5.5" fill="#fff6ea" stroke="none" transform="rotate(-20 154 144)"/>
+      <ellipse cx="216" cy="144" rx="7.5" ry="5.5" fill="#fff6ea" stroke="none" transform="rotate(20 216 144)"/>
+      <!-- open eyes -->
+      <ellipse cx="150" cy="180" rx="9" ry="11" fill="#231f1d" stroke="none"/>
+      <ellipse cx="220" cy="180" rx="9" ry="11" fill="#231f1d" stroke="none"/>
+      <circle cx="153" cy="176" r="3.2" fill="#ffffff" stroke="none"/>
+      <circle cx="223" cy="176" r="3.2" fill="#ffffff" stroke="none"/>
+      <!-- cheeks -->
+      <ellipse cx="126" cy="210" rx="19" ry="10.5" fill="#ffb2a0" stroke="none"/>
+      <ellipse cx="244" cy="210" rx="19" ry="10.5" fill="#ffb2a0" stroke="none"/>
+      <!-- nose -->
+      <path d="M173 200C173 193 197 193 197 200C197 208 190 213 185 214C180 213 173 208 173 200Z" fill="#231f1d" stroke-width="2"/>
+      <path d="M185 214v4" fill="none" stroke-width="3.5"/>
+
+      <!-- the scroll, held in the mouth -->
+      <path d="M134 222C160 219 200 218 236 220L238 244C200 244 162 246 138 250C133 244 132 230 134 222Z" fill="#fdfdfb" stroke-width="4"/>
+      <path d="M146 238C176 235 206 234 230 235" fill="none" stroke="#c9c9c6" stroke-width="4"/>
+      <ellipse cx="237" cy="232" rx="7" ry="13" fill="#c9c9c6" stroke-width="4"/>
+      <ellipse cx="237" cy="232" rx="2.6" ry="6" fill="none" stroke="#7d7d7a" stroke-width="2.5"/>
+      <path d="M180 220V250" fill="none" stroke="#d6533a" stroke-width="6"/>
+      <path d="M166 221l3 6M200 220l-3 6" fill="none" stroke-width="2.5"/>
+      <path d="M176 256Q185 261 194 256" fill="none" stroke-width="3"/>
+    </g>
+  </g>
+</svg>
