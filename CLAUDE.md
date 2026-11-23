@@ -118,7 +118,7 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
   - Wasp 0.22 via `npm i -g @wasp.sh/wasp-cli`, not the old installer script.
   - Static ffmpeg 6.0 at `~/.local/bin/ffmpeg`.
   - yt-dlp 2026.10.26. `~/.local/bin/yt-dlp` is a wrapper that runs the **Python zipapp** (`~/.local/share/yt-dlp/yt-dlp.zipapp`), which starts in ~1 s. The macOS one-file build (kept as `yt-dlp-onefile`) spends ~17 s unpacking itself on every run. The old `/usr/local/bin/yt-dlp` (2025.06) fails on YouTube with "The page needs to be reloaded". YouTube now needs a JS runtime, so ingest passes `--js-runtimes node:<server's node>`.
-  - The server auto-detects both binaries; override with `FFMPEG_PATH` / `YTDLP_PATH`.
+  - The server auto-detects both binaries (`~/.local/bin` first, else on PATH, e.g. `sudo apt install ffmpeg` on Linux/WSL); override with `FFMPEG_PATH` / `YTDLP_PATH`. A bare `ffmpeg` on PATH is not passed to yt-dlp's `--ffmpeg-location` (it takes a path, and a bare name makes yt-dlp report "ffmpeg is not installed"), so yt-dlp searches PATH itself.
 - **Run the backend:** `cd wasp-app && cp .env.server.example .env.server` (fill in the keys), then `wasp db migrate-dev`, then `wasp start`. The server runs on `localhost:3001` and the client on `localhost:3000`.
 - **Build the extension:** `cd extension && npm i && npm run build` (or `npm run watch`). Load it unpacked from `extension/` at `chrome://extensions`, and reload it after each build.
 - **Tests:** run `npm test` (vitest) in either package.

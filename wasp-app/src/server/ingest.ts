@@ -12,6 +12,7 @@ import { getVideo } from "./videos";
 
 const run = promisify(execFile);
 
+/** A full path to ffmpeg when we know one, else the bare name "ffmpeg", which is looked up on PATH. */
 function ffmpegPath(): string {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
   const local = path.join(os.homedir(), ".local/bin/ffmpeg");
@@ -97,8 +98,9 @@ export async function ingest(videoId: string): Promise<void> {
       // yt-dlp needs a JS runtime for YouTube; reuse the Node running this server.
       "--js-runtimes",
       `node:${process.execPath}`,
-      "--ffmpeg-location",
-      ffmpeg,
+      // --ffmpeg-location takes a path. Given the bare name (ffmpeg installed on PATH, e.g. with
+      // apt on Linux/WSL), yt-dlp says "ffmpeg is not installed", so leave it to yt-dlp's PATH search.
+      ...(path.basename(ffmpeg) === ffmpeg ? [] : ["--ffmpeg-location", ffmpeg]),
       "--download-sections",
       "*0:00-3:00",
       // The page title can be stale right after YouTube's in-app navigation, so take it from yt-dlp.
