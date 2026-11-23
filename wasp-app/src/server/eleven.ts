@@ -5,8 +5,9 @@ import type { Segment } from "../shared/types";
 
 const SCRIBE_MODEL = process.env.ELEVENLABS_SCRIBE_MODEL ?? "scribe_v2";
 const TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL ?? "eleven_flash_v2_5";
-// Stock premade voice ("George"). Never a cloned actor.
-const VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "JBFqnCBsd6RMkjVDRZzb";
+// Scriba's voice: "Hope - upbeat and clear" from the ElevenLabs voice library
+// (published by its voice actor). Never a clone of an actor from the video.
+const VOICE_ID = process.env.ELEVENLABS_VOICE_ID ?? "tnSpp4vdxKPjI9w0GnoV";
 
 let client: ElevenLabsClient | null = null;
 function eleven(): ElevenLabsClient {

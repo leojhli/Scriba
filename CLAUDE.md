@@ -126,7 +126,7 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
   - `/ext/shadow` also accepts `text` and `origDur`, so captions-only lines (`segmentId: -1`) can be scored before Scribe is ready. Those attempts aren't saved.
   - **No innerHTML in the extension:** YouTube enforces Trusted Types, so the overlay builds its DOM with a small `h()` helper and styles via `adoptedStyleSheets`. Clicks inside the bubble call `stopPropagation()` so they don't toggle YouTube's play/pause.
   - Media goes from the background worker to the content script as base64, and the content script turns it into a `blob:` URL. Service workers can't create blob URLs.
-  - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 5.5 s timeout. TTS uses the stock voice `JBFqnCBsd6RMkjVDRZzb` with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
+  - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 5.5 s timeout. TTS uses **Hope** ("Hope - upbeat and clear", library voice `tnSpp4vdxKPjI9w0GnoV`; switched from the stock voice George `JBFqnCBsd6RMkjVDRZzb` on 2026-11-22, same ~0.35 s latency) with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
   - **Titles come from yt-dlp** (`--print after_move:title`), because the YouTube page title is stale right after in-app navigation. Before this fix, titles were off by one video.
   - **Re-ingest:** clears the old line data (`segments` set to null, `explain-*`, `translations.json`), because line ids change.
   - **Status chip:** the extension shows "Listening to the first 3 minutes…", then "Ready · pause anytime", then "Couldn't process…" or "Can't reach the server". Past 3:00, explain falls back to captions and says so if CC is off.
@@ -176,7 +176,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 - Language: any. Auto-detected per video by Scribe (originally Spanish only; see "Any language").
 - Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY`. The extension holds only `DEMO_KEY`, which maps every request to the demo user.
 - Never a blank overlay: it shows "thinking…" immediately, and every call has an 8 s timeout with a cached fallback.
-- Mascot voice: a stock ElevenLabs voice, never a cloned actor.
+- Mascot voice: Hope from the ElevenLabs voice library (published by its voice actor), never a clone of an actor from the video.
 
 ## Review focus (edge cases)
 

@@ -46,7 +46,7 @@ YouTube tab
 
 ## Partner tools
 
-- **ElevenLabs:** Scribe (video transcript + shadowing scores), Voice Isolator ("Hear it clearly"), text-to-speech (mascot voice, stock voice).
+- **ElevenLabs:** Scribe (video transcript + shadowing scores), Voice Isolator ("Hear it clearly"), text-to-speech (Scriba's voice, Hope from the voice library).
 - **Wasp:** the API endpoints the extension talks to, auth, Prisma entities, and the `/deck` + `/practice` pages with a query and an action.
 
 ## Run it
