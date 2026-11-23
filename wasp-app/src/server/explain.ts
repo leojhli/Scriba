@@ -2,11 +2,12 @@ import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
 import type { ExtExplain } from "wasp/server/api";
-import { hasNonLatin, spokenText } from "../shared/text";
+import { displaySummary, hasNonLatin, speechParts } from "../shared/text";
+import type { SpeechPart } from "../shared/text";
 import type { Explanation } from "../shared/types";
 import { window as segWindow } from "../shared/window";
 import { checkDemoKey } from "./demoKey";
-import { speak } from "./eleven";
+import { speakMixed } from "./eleven";
 import { recordPause } from "./moments";
 import { readJson, videoDir, writeJson } from "./paths";
 import { getVideo, readTranslations, translationsFile, videoLanguage } from "./videos";
@@ -25,13 +26,15 @@ Reply only with JSON:
   - "romanization": if the line is in a non-Latin script, the whole line in Latin letters: Hanyu Pinyin with tone marks for Chinese, Hepburn romaji for Japanese, Revised Romanization for Korean, a standard transliteration for any other script. Keep words already in Latin letters as they are. Empty string for a line in a Latin-script language;
   - "translation": a natural English translation;
   - "notes": 1–2 short notes for the justSaid line and at most 1 for each context line: what the line means at this moment in the video (what it refers to, the joke, feeling or subtext), idioms, slang or grammar. Give the reading of key words in non-Latin scripts (pinyin, romaji…).
-- "summary": what you say out loud. 1–2 short spoken sentences (45 words at most) in English about the justSaid line: what it means here, at this moment in the video (who it's aimed at, what it refers to, the joke, feeling or subtext), and the single most useful thing to learn from it (a word, an idiom, a grammar point or the tone). A quick bit of plot recap to set the line up is fine, but keep the focus on this line: no overview of the whole video or song, and don't open with "In this clip" or "Here". Talk to the learner directly, like a friend leaning over. Don't guess a speaker's gender: say "they" or use a name from the lines. You may quote one short word or phrase from the line in its original script, but never write pinyin or romaji in the summary.`;
+- "summary": what you say out loud. 1–2 short spoken sentences (45 words at most) in English about the justSaid line: what it means here, at this moment in the video (who it's aimed at, what it refers to, the joke, feeling or subtext), and the single most useful thing to learn from it (a word, an idiom, a grammar point or the tone). A quick bit of plot recap to set the line up is fine, but keep the focus on this line: no overview of the whole video or song, and don't open with "In this clip" or "Here". Talk to the learner directly, like a friend leaning over. Don't guess a speaker's gender: say "they" or use a name from the lines. You may quote one short word or phrase from the line in its original script, but never write pinyin or romaji in the summary. Wrap every word or phrase you quote in the video's language in «guillemets», exactly as written in the line, e.g. The key phrase is «难追», hard to chase. / They call it «la neta», the honest truth. The quotes are read aloud in that language's own accent, so put only the foreign words inside, never English.
+- "language": the ISO 639-1 code of the language of the lines (e.g. "es", "zh", "ja", "ko", "fr").`;
 
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["summary", "lines"],
+  required: ["summary", "language", "lines"],
   properties: {
+    language: { type: "string", description: "ISO 639-1 code of the lines' language, e.g. es, zh, ja." },
     summary: { type: "string", description: "Spoken explanation of the justSaid line only: 1–2 short sentences in English." },
     lines: {
       type: "array",
@@ -51,7 +54,7 @@ const SCHEMA = {
 } as const;
 
 type Line = { segmentId: number; text: string; start: number; end: number };
-type ClaudeOut = { summary: string; lines: { index: number; romanization: string; translation: string; notes: string[] }[] };
+type ClaudeOut = { summary: string; language?: string; lines: { index: number; romanization: string; translation: string; notes: string[] }[] };
 
 let anthropic: Anthropic | null = null;
 function claude(): Anthropic {
@@ -90,6 +93,19 @@ async function askClaude(lines: Line[], title: string, language: string | null, 
     }
   }
   throw new Error("Claude returned invalid JSON twice");
+}
+
+// Scribe reports ISO 639-3 ("zho", "spa"); ElevenLabs TTS takes ISO 639-1 ("zh", "es").
+const ISO3_TO_1: Record<string, string> = {
+  zho: "zh", cmn: "zh", yue: "zh", spa: "es", jpn: "ja", kor: "ko", fra: "fr", deu: "de", ita: "it", por: "pt",
+  rus: "ru", ara: "ar", hin: "hi", tur: "tr", vie: "vi", tha: "th", ind: "id", nld: "nl", pol: "pl", eng: "en",
+};
+
+/** The code the foreign parts are spoken with: Claude's answer, else the language Scribe detected. */
+function ttsLanguage(fromClaude: string | undefined, fromScribe: string | null): string | null {
+  const c = fromClaude?.trim().toLowerCase().slice(0, 2);
+  if (c && /^[a-z]{2}$/.test(c)) return c;
+  return (fromScribe && ISO3_TO_1[fromScribe]) || null;
 }
 
 type Cache = Record<string, Explanation>;
@@ -154,11 +170,15 @@ export const extExplain: ExtExplain = async (req, res) => {
   const t0 = Date.now();
   let tClaude = 0;
   let explanation: Explanation;
+  let speech: SpeechPart[] = [];
+  let speechLang: string | null = null;
   try {
     const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId), background);
     const byIndex = new Map(out.lines.map((l) => [l.index, l]));
+    speech = speechParts(out.summary);
+    speechLang = ttsLanguage(out.language, videoLanguage(videoId));
     explanation = {
-      summary: out.summary,
+      summary: displaySummary(out.summary),
       audioUrl: null,
       lines: lines.map((l, i) => {
         const o = byIndex.get(i) ?? out.lines[i];
@@ -203,7 +223,7 @@ export const extExplain: ExtExplain = async (req, res) => {
   const t1 = Date.now();
   try {
     const file = `explain-${key}.mp3`;
-    await speak(spokenText(explanation.summary), path.join(videoDir(videoId), file));
+    await speakMixed(speech, speechLang, path.join(videoDir(videoId), file));
     explanation.audioUrl = `/media/${videoId}/${file}`;
   } catch (e) {
     console.error("[explain] TTS failed", e);

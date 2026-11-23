@@ -39,3 +39,53 @@ export function spokenText(summary: string): string {
 export function hasNonLatin(s: string): boolean {
   return /(?!\p{Script=Latin})\p{L}/u.test(s);
 }
+
+// ---------- Speaking other languages in their own accent ----------
+// The summary is English, but it quotes words from the video. Read in one English TTS call,
+// those get anglicized ("难追" → "nonjui"), so the voice is split into parts and each quote is
+// spoken with its own language code. Claude marks quotes «like this»; non-Latin script is
+// caught even without the marks.
+
+export type SpeechPart = { text: string; foreign: boolean };
+
+const QUOTE = /«([^»]*)»/g;
+// A run of non-Latin letters (Han, Kana, Hangul, Cyrillic…), with CJK punctuation and the
+// spaces between words of the same script.
+const NON_LATIN_WORD = `(?:(?!\\p{Script=Latin})\\p{L}|[${CJK_PUNCT}])+`;
+const NON_LATIN_RUN = new RegExp(`${NON_LATIN_WORD}(?:\\s+${NON_LATIN_WORD})*`, "gu");
+
+/** Splits what the mascot says into English parts and parts in the video's language. */
+export function speechParts(summary: string): SpeechPart[] {
+  const raw: SpeechPart[] = [];
+  const text = spokenText(summary);
+  let at = 0;
+  const english = (s: string) => {
+    let i = 0;
+    for (const m of s.matchAll(NON_LATIN_RUN)) {
+      raw.push({ text: s.slice(i, m.index), foreign: false }, { text: m[0], foreign: true });
+      i = m.index + m[0].length;
+    }
+    raw.push({ text: s.slice(i), foreign: false });
+  };
+  for (const m of text.matchAll(QUOTE)) {
+    english(text.slice(at, m.index));
+    raw.push({ text: m[1], foreign: true });
+    at = m.index + m[0].length;
+  }
+  english(text.slice(at));
+
+  const parts: SpeechPart[] = [];
+  for (const p of raw) {
+    const t = p.text.trim();
+    if (!t) continue;
+    const last = parts[parts.length - 1];
+    if (last && (last.foreign === p.foreign || !/[\p{L}\p{N}]/u.test(t))) last.text += (/^[,.;:!?…]/.test(t) ? "" : " ") + t;
+    else parts.push({ text: t, foreign: p.foreign });
+  }
+  return parts;
+}
+
+/** The summary as shown on screen: the «quote marks» meant for the voice become ordinary quotes. */
+export function displaySummary(summary: string): string {
+  return summary.replace(QUOTE, "“$1”");
+}

@@ -1,7 +1,9 @@
 import fs from "node:fs/promises";
 import { ElevenLabsClient } from "@elevenlabs/elevenlabs-js";
 import { groupWords, type Word } from "../shared/segments";
+import type { SpeechPart } from "../shared/text";
 import type { Segment } from "../shared/types";
+import { joinMp3 } from "./mp3";
 
 const SCRIBE_MODEL = process.env.ELEVENLABS_SCRIBE_MODEL ?? "scribe_v2";
 const TTS_MODEL = process.env.ELEVENLABS_TTS_MODEL ?? "eleven_flash_v2_5";
@@ -58,13 +60,48 @@ export async function isolate(inPath: string, outPath: string): Promise<string |
   }
 }
 
-/** Text-to-speech with the stock mascot voice. Writes an mp3 to outPath. */
+async function tts(text: string, opts: { languageCode?: string; previousText?: string; nextText?: string } = {}): Promise<Buffer> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const stream = await eleven().textToSpeech.convert(VOICE_ID, {
+        text,
+        modelId: TTS_MODEL,
+        outputFormat: "mp3_44100_128",
+        ...(opts.languageCode ? { languageCode: opts.languageCode } : {}),
+        ...(opts.previousText ? { previousText: opts.previousText } : {}),
+        ...(opts.nextText ? { nextText: opts.nextText } : {}),
+      });
+      return await streamToBuffer(stream);
+    } catch (e) {
+      // Several parts go out at once; on a busy plan ElevenLabs answers 429. Retry once.
+      if (attempt >= 1 || (e as { statusCode?: number }).statusCode !== 429) throw e;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+}
+
+/** Text-to-speech in Scriba's voice. Writes an mp3 to outPath. */
 export async function speak(text: string, outPath: string): Promise<string> {
-  const stream = await eleven().textToSpeech.convert(VOICE_ID, {
-    text,
-    modelId: TTS_MODEL,
-    outputFormat: "mp3_44100_128",
-  });
-  await fs.writeFile(outPath, await streamToBuffer(stream));
+  await fs.writeFile(outPath, await tts(text));
+  return outPath;
+}
+
+/**
+ * Speaks a summary that quotes another language: English parts with "en", quotes with the
+ * video's language code, so "难追" sounds Mandarin instead of "nonjui". The parts are made in
+ * parallel (with the neighbouring text as context, for natural intonation) and joined.
+ */
+export async function speakMixed(parts: SpeechPart[], language: string | null, outPath: string): Promise<string> {
+  if (parts.length <= 1 && !parts.some((p) => p.foreign)) return speak(parts[0]?.text ?? "", outPath);
+  const clips = await Promise.all(
+    parts.map((p, i) =>
+      tts(p.text, {
+        languageCode: p.foreign ? (language ?? undefined) : "en",
+        previousText: parts.slice(0, i).map((q) => q.text).join(" ").slice(-300) || undefined,
+        nextText: parts.slice(i + 1).map((q) => q.text).join(" ").slice(0, 300) || undefined,
+      }),
+    ),
+  );
+  await fs.writeFile(outPath, joinMp3(clips));
   return outPath;
 }
