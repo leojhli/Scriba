@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nextVoiceRate, rateLabel, VOICE_RATES } from "./voiceRate";
+import { CLIP_RATES, nextVoiceRate, rateLabel, shortRateLabel, VOICE_RATES } from "./voiceRate";
 
 describe("nextVoiceRate", () => {
   it("steps up from normal speed", () => {
@@ -26,5 +26,11 @@ describe("nextVoiceRate", () => {
 describe("rateLabel", () => {
   it("prints speeds the way video players do", () => {
     expect(VOICE_RATES.map(rateLabel)).toEqual(["0.75×", "1×", "1.25×", "1.5×", "2×"]);
+  });
+});
+
+describe("shortRateLabel", () => {
+  it("drops the leading zero for the Hear it clearly pill", () => {
+    expect(CLIP_RATES.map(shortRateLabel)).toEqual(["1×", ".75×", ".5×"]);
   });
 });

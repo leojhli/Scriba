@@ -7,7 +7,8 @@
 // No innerHTML anywhere: YouTube enforces Trusted Types, so the DOM (and SVG) is built by hand.
 import { WEB_URL } from "./shared/config";
 import type { Explanation, ShadowResult } from "./shared/types";
-import { nextVoiceRate, rateLabel } from "./voiceRate";
+import { CLIP_RATES, nextVoiceRate, rateLabel, shortRateLabel } from "./voiceRate";
+import { HEAR_IT_RATE } from "./shared/config";
 import type { Fx } from "./fx";
 
 export type Line = Explanation["lines"][number];
@@ -19,6 +20,7 @@ export type OverlayHandlers = {
   onClose(): void;
   onResume(): void;
   onVoiceRate(rate: number): void;
+  onClipRate(rate: number): void;
 };
 
 type Kid = Node | string | null | false | undefined;
@@ -208,6 +210,22 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
 .btn.speed { font-variant-numeric: tabular-nums; }
 .btn.speed.custom { background: rgba(255,163,60,.3); }
 .btn.changed { animation: pop .3s ease-out; }
+
+/* "Hear it clearly" + its speed: a sketched slider pill whose hatched thumb slides between stops */
+.hear { display: inline-flex; align-items: center; gap: .3em; }
+.rates { position: relative; display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; align-items: stretch; padding: 2px;
+  font-family: var(--hand); font-weight: 700; font-size: .72em; color: var(--ink); background: rgba(255,252,246,.55);
+  border-radius: 14px 18px 13px 19px / 18px 13px 19px 14px; }
+.rates::before { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--ink); border-radius: inherit; filter: url(#sk1); pointer-events: none; }
+.rates .thumb { position: absolute; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 3);
+  transform: translateX(calc(var(--i, 1) * 100%)); transition: transform .26s cubic-bezier(.3,1.45,.55,1);
+  border-radius: 11px 14px 10px 15px / 14px 10px 15px 11px; pointer-events: none;
+  background: repeating-linear-gradient(-55deg, rgba(255,163,60,.85) 0 2.5px, rgba(255,163,60,.45) 2.5px 6px); }
+.rates .thumb::before { content: ""; position: absolute; inset: 0; border: 1.3px solid var(--ink); border-radius: inherit; filter: url(#sk2); }
+.rates button { all: unset; position: relative; z-index: 1; cursor: pointer; user-select: none; text-align: center;
+  padding: .34em .6em; font-variant-numeric: tabular-nums; border-radius: 10px; transition: transform .1s; }
+.rates button:hover { transform: rotate(-2deg) scale(1.06); }
+.rates button:focus-visible { outline: 2px dashed var(--shiba-deep); outline-offset: 1px; }
 a.btn { text-decoration: none; }
 .ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -286,6 +304,8 @@ export class Overlay {
   private isOffline = false;
   private isSpeaking = false;
   private voiceRate = 1;
+  private clipRate = HEAR_IT_RATE;
+  private ratePills: HTMLDivElement[] = [];
   // three.js paper field
   private fx: Fx | null = null;
   private fxLoading = false;
@@ -418,6 +438,7 @@ export class Overlay {
     this.results = [];
     this.shadowBtns = [];
     this.hearBtns = [];
+    this.ratePills = [];
 
     const face = h("img");
     face.src = MASCOT();
@@ -495,6 +516,7 @@ export class Overlay {
     this.results = [];
     this.shadowBtns = [];
     this.hearBtns = [];
+    this.ratePills = [];
 
     const i = e.lines.length - 1;
     if (i < 0) {
@@ -506,9 +528,9 @@ export class Overlay {
     const actions = h("div", "actions");
     if (can.hear(line)) {
       const hear = h("button", "btn", icon("headphones"), "Hear it clearly");
-      hear.title = "Just the voice, music removed, at 0.75×";
+      hear.title = "Just the voice, music removed";
       hear.addEventListener("click", () => this.handlers.onHear(line, i));
-      actions.append(hear);
+      actions.append(h("div", "hear", hear, this.ratePill()));
       this.hearBtns[i] = hear;
     }
     if (can.shadow(line)) {
@@ -578,7 +600,52 @@ export class Overlay {
     const b = this.hearBtns[i];
     if (!b) return;
     b.classList.toggle("playing", on);
-    b.replaceChildren(icon("headphones"), on ? "Playing… 0.75×" : "Hear it clearly");
+    b.replaceChildren(icon("headphones"), on ? `Playing… ${shortRateLabel(this.clipRate)}` : "Hear it clearly");
+  }
+
+  /** The speed picked on the slider pill next to "Hear it clearly". */
+  setClipRate(rate: number): void {
+    this.clipRate = rate;
+    for (const p of this.ratePills) this.fillRatePill(p);
+    this.hearBtns.forEach((b, i) => b?.classList.contains("playing") && this.hearing(i, true));
+  }
+
+  /** A three-stop pill (1× · .75× · .5×) whose thumb slides to the chosen speed. */
+  private ratePill(): HTMLDivElement {
+    const pill = h("div", "rates", h("span", "thumb"));
+    pill.setAttribute("role", "radiogroup");
+    pill.setAttribute("aria-label", "Hear it clearly speed");
+    pill.title = "How fast Hear it clearly plays the line";
+    for (const rate of CLIP_RATES) {
+      const b = h("button", "", shortRateLabel(rate));
+      b.setAttribute("role", "radio");
+      b.setAttribute("aria-label", rateLabel(rate));
+      b.dataset.rate = String(rate);
+      b.addEventListener("click", () => this.handlers.onClipRate(rate));
+      pill.append(b);
+    }
+    // Arrow keys move along the pill, like any radio group.
+    pill.addEventListener("keydown", (ev) => {
+      const step = ev.key === "ArrowRight" ? 1 : ev.key === "ArrowLeft" ? -1 : 0;
+      if (!step) return;
+      ev.preventDefault();
+      const j = CLIP_RATES.indexOf(this.clipRate) + step;
+      if (j < 0 || j >= CLIP_RATES.length) return;
+      this.handlers.onClipRate(CLIP_RATES[j]);
+      pill.querySelector<HTMLButtonElement>(`[data-rate="${CLIP_RATES[j]}"]`)?.focus();
+    });
+    this.ratePills.push(pill);
+    this.fillRatePill(pill);
+    return pill;
+  }
+
+  private fillRatePill(pill: HTMLDivElement): void {
+    const at = Math.max(0, CLIP_RATES.indexOf(this.clipRate));
+    pill.style.setProperty("--i", String(at));
+    pill.querySelectorAll<HTMLButtonElement>("button").forEach((b, j) => {
+      b.setAttribute("aria-checked", String(j === at));
+      b.tabIndex = j === at ? 0 : -1;
+    });
   }
 
   shadowState(i: number, state: "recording" | "scoring" | "idle"): void {

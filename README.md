@@ -14,7 +14,7 @@ Everything is drawn in a hand-sketched, paper-and-pencil style around the mascot
 
 - **The scroll sidebar.** Pause and a translucent paper scroll (rolled ends, a red ribbon bookmark, pencil-sketch edges, handwritten labels) slides in on the right of the video. Top to bottom it shows:
   - Scriba Inu with the spoken note (click to expand), plus the voice-speed pill (0.75×–2×) and ×.
-  - **Just said:** the line, its romanization and translation, **Hear it clearly** and **Hold to shadow**, and notes.
+  - **Just said:** the line, its romanization and translation, **Hear it clearly** with a slider pill for its speed (1× · .75× · .5×), **Hold to shadow**, and notes.
   - The line before it, then **Deck**, **Practice** and **Keep watching**.
 - **Paper field.** Behind the scroll text, scraps of paper carrying the paused line's characters or words drift up faintly (three.js, loaded only when the scroll first opens).
 - **Stays out of the way.** The scroll sits under YouTube's control bar, so the controls and fullscreen still work. Click the video or press Space/K to keep watching; Esc closes without resuming.
@@ -26,7 +26,7 @@ Everything is drawn in a hand-sketched, paper-and-pencil style around the mascot
 1. **Watches alongside you.** When a video opens, the server downloads the first 3 minutes (yt-dlp), transcribes it with **ElevenLabs Scribe** (language auto-detected, word timestamps) and separates the dialogue with **ElevenLabs Voice Isolator**. The extension also reads the on-screen captions live.
 2. **Explains on pause.** Pause and the Scriba scroll slides in. **Claude** translates the last few lines and adds notes on slang, grammar and the scene, and **ElevenLabs TTS** reads the summary aloud.
 3. **Builds your deck.** Every line you paused on becomes a card at `/deck`, ranked by how often you stopped there.
-4. **Turns it into practice.** *Hear it clearly* plays just the voice (music removed) at 0.75×. *Shadowing*: say the line, and Scribe scores you word by word with a coloured diff and pace.
+4. **Turns it into practice.** *Hear it clearly* plays just the voice (music removed) at 1×, 0.75× or 0.5×. *Shadowing*: say the line, and Scribe scores you word by word with a coloured diff and pace.
 
 ## Architecture
 

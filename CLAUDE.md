@@ -82,6 +82,8 @@ The voice explains **the line just said, at that moment in the video**: what it 
 
 **Voice speed:** the pill next to the × in the panel header cycles 0.75× → 1× → 1.25× → 1.5× → 2× (`extension/src/voiceRate.ts`). It applies at once, even mid-sentence, with pitch preserved, and is saved in `chrome.storage.local`, so it carries over to every video and tab. Each tab tags its own writes so a late storage echo can't undo a newer click.
 
+**Hear it clearly speed (added 2026-11-22):** a slider pill right of the button (1× · .75× · .5×, default .75× = `HEAR_IT_RATE`) whose hatched thumb slides to the pick. Clicks or ←/→ change it; it applies to a playing clip at once and is saved as `clipRate` in `chrome.storage.local`, with the same per-tab tagging (both settings use `rateSetting()` in `voiceRate.ts`). The /practice page still plays at a fixed 0.75×.
+
 ## Scriba UI (decided 2026-11-22)
 
 On pause, a **right-hand sidebar drawn as an unrolled paper scroll** slides in over the video (`extension/src/overlay.ts`). The user asked for: right sidebar, translucent, minimal, sketched rather than solid, and the text box like a scroll.

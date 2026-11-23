@@ -7,7 +7,15 @@ import { DIALOGUE_POLL_MS, HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config
 import type { Explanation, Segment, ShadowResult } from "./shared/types";
 import { window as segWindow } from "./shared/window";
 import { isAdShowing, watchAds, watchPlayback } from "./signals";
-import { loadVoiceRate, onVoiceRateChange, rateLabel, saveVoiceRate } from "./voiceRate";
+import {
+  loadClipRate,
+  loadVoiceRate,
+  onClipRateChange,
+  onVoiceRateChange,
+  rateLabel,
+  saveClipRate,
+  saveVoiceRate,
+} from "./voiceRate";
 
 type Session = { status: "processing" | "ready" | "failed"; segments: Segment[] | null; hasDialogue: boolean };
 
@@ -24,10 +32,11 @@ let speech: HTMLAudioElement | null = null;
 let clip: HTMLAudioElement | null = null;
 let shadowStart: Promise<boolean> | null = null;
 let voiceRate = 1;
+let clipRate = HEAR_IT_RATE;
 
 const captions = new CaptionBuffer();
 const recorder = new Recorder();
-const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose, onResume, onVoiceRate });
+const overlay = new Overlay({ onHear, onShadowStart, onShadowStop, onClose, onResume, onVoiceRate, onClipRate });
 let clipIndex = -1;
 
 function player(): HTMLVideoElement | null {
@@ -176,6 +185,22 @@ function applyVoiceRate(rate: number): void {
   log(`voice speed ${rateLabel(rate)}`);
 }
 
+// ---------- "Hear it clearly" speed (the slider pill next to it) ----------
+
+/** Applies at once, even mid-clip, and is saved for every video and tab. */
+function onClipRate(rate: number): void {
+  applyClipRate(rate);
+  saveClipRate(rate);
+}
+
+function applyClipRate(rate: number): void {
+  if (rate === clipRate) return;
+  clipRate = rate;
+  overlay.setClipRate(rate);
+  if (clip) clip.defaultPlaybackRate = clip.playbackRate = rate;
+  log(`hear-it-clearly speed ${rateLabel(rate)}`);
+}
+
 function stopAudio(): void {
   speech?.pause();
   speech = null;
@@ -227,7 +252,7 @@ async function onHear(line: Line, i: number): Promise<void> {
     "loadedmetadata",
     () => {
       a.currentTime = Math.max(0, seg.start - 0.1);
-      a.defaultPlaybackRate = a.playbackRate = HEAR_IT_RATE;
+      a.defaultPlaybackRate = a.playbackRate = clipRate;
       void a.play();
     },
     { once: true },
@@ -306,6 +331,8 @@ watchAds((ad) => {
 captions.start();
 void loadVoiceRate().then(applyVoiceRate);
 onVoiceRateChange(applyVoiceRate);
+void loadClipRate().then(applyClipRate);
+onClipRateChange(applyClipRate);
 document.addEventListener("yt-navigate-finish", onNavigate);
 window.addEventListener("popstate", onNavigate);
 onNavigate();
