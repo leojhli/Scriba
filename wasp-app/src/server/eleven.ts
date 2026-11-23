@@ -89,17 +89,24 @@ export async function speak(text: string, outPath: string): Promise<string> {
 /**
  * Speaks a summary that quotes another language: English parts with "en", quotes with the
  * video's language code, so "难追" sounds Mandarin instead of "nonjui". The parts are made in
- * parallel (with the neighbouring text as context, for natural intonation) and joined.
+ * parallel (English parts get the neighbouring text as context, for natural intonation) and joined.
  */
 export async function speakMixed(parts: SpeechPart[], language: string | null, outPath: string): Promise<string> {
   if (parts.length <= 1 && !parts.some((p) => p.foreign)) return speak(parts[0]?.text ?? "", outPath);
   const clips = await Promise.all(
     parts.map((p, i) =>
-      tts(p.text, {
-        languageCode: p.foreign ? (language ?? undefined) : "en",
-        previousText: parts.slice(0, i).map((q) => q.text).join(" ").slice(-300) || undefined,
-        nextText: parts.slice(i + 1).map((q) => q.text).join(" ").slice(0, 300) || undefined,
-      }),
+      tts(
+        p.text,
+        // Quotes get no context: English around a short quote pulls it back to an English accent
+        // (难追 with context → "Nanjue" 3/3 times; without → Mandarin 3/3, checked with Scribe).
+        p.foreign
+          ? { languageCode: language ?? undefined }
+          : {
+              languageCode: "en",
+              previousText: parts.slice(0, i).map((q) => q.text).join(" ").slice(-300) || undefined,
+              nextText: parts.slice(i + 1).map((q) => q.text).join(" ").slice(0, 300) || undefined,
+            },
+      ),
     ),
   );
   await fs.writeFile(outPath, joinMp3(clips));
