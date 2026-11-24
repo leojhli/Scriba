@@ -97,3 +97,9 @@ action submitShadow {
   fn: import { submitShadow } from "@src/server/deck",
   entities: [ShadowAttempt, Video, User]
 }
+
+// The × on a deck card: deletes that line's pauses and practice attempts.
+action deleteCard {
+  fn: import { deleteCard } from "@src/server/deck",
+  entities: [Moment, ShadowAttempt, User]
+}
