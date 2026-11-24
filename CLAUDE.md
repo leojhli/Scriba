@@ -71,6 +71,14 @@ A pause now speaks once the summary is done, without waiting for the translation
 - **Failures:** if Claude fails before the summary, the answer is the offline one, as before (not partial). If it fails after the voice, the rest returns the voice's summary with any known translations.
 - **Log:** `[explain] <id>@<t>s voice ready at …ms (summary …ms), details to follow`, then `[explain] <id>@<t>s summary=…ms voice=…ms claude=…ms total=…ms`.
 
+## Study tools in the scroll + on/off switch (built 2026-11-24, branch `feat/faster-pauses`)
+
+- **On/off switch:** the toolbar icon opens a popup (`popup.html` + `src/popup.ts`) with a sketched switch and Deck / Practice links (it used to open the deck directly). Saved as `enabled` in `chrome.storage.local` (`src/enabled.ts`); every tab follows it. Off: no session call (so no download or transcription), pauses ignored, overlay and chips cleared; the icon shows an "off" badge. Turning it on mid-pause explains right away.
+- **Tap a word:** every word of the "Just said" line is tappable (`splitWords()` in `src/words.ts`, `Intl.Segmenter`, so Chinese/Japanese split into words). A word card under the translation shows the meaning in this line, dictionary form, romanization and a note, from **`/ext/word`** (`src/server/word.ts`, same Claude settings as explain, cached in `data/{id}/words.json`). Its speaker button plays the word cut from the voice-only dialogue track; when the video has no dialogue track or no word timings, the server also TTSes the word in the video's language.
+- **Words light up as they're heard:** during Hear it clearly (and the compare buttons), each word of the line is highlighted. Ingest now keeps Scribe's word timings (`Segment.words`, optional); older transcripts (including the demo-cache video) spread the line's time by length instead (`charTimes()`). Scriba's spoken note is also highlighted word by word, paced by length over the clip (TTS gives no timings).
+- **Compare your take:** after "Hold to shadow", Original / You / Back to back buttons play the line and your recording (kept as a blob in the content script) even if scoring fails.
+- **Not verified live:** `/ext/word` and the highlight timing against real Scribe word timings need API keys. Verified: unit tests (`words.test.ts`, segments), type checks, and the overlay drawn on a test page (word card, compare row, highlights, real clicks on words).
+
 ## Any language (decided 2026-11-22)
 
 The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.
@@ -224,7 +232,9 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 `shared/types.ts` is copied into both the extension and the Wasp app (`src/shared/`):
 
 ```ts
-export type Segment = { id: number; start: number; end: number; text: string }
+export type Segment = { id: number; start: number; end: number; text: string;
+  words?: { text: string; start: number; end: number }[] }  // Scribe word timings (newer ingests)
+export type WordGloss = { word: string; lemma?: string; romanization?: string; meaning: string; note?: string; audioUrl: string | null }
 export type Explanation = { summary: string; audioUrl: string | null;
   lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
   offline?: boolean; partial?: boolean }
@@ -239,6 +249,7 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 | `/ext/session` | `{ videoId, title }` | `{ status: "processing" \| "ready" \| "failed", segments: Segment[] \| null, hasDialogue: boolean }`. Starts ingest on the first call; the extension polls every 5 s. |
 | `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. May be `partial: true` (voice first, translations still coming). |
 | `/ext/explain-rest` | `{ videoId, t }` | The full `Explanation` for a pause that came back `partial`; 404 if there's none. |
+| `/ext/word` | `{ videoId, segmentId, line, word, index }` | `WordGloss` for a tapped word (cached per video). 502 if Claude is unavailable. |
 | `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
 
 Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, and `submitShadow` (action), which uses the same scoring as `/ext/shadow`.

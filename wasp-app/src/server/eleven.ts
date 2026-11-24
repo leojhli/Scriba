@@ -86,6 +86,12 @@ export async function speak(text: string, outPath: string): Promise<string> {
   return outPath;
 }
 
+/** Text-to-speech in a given language (e.g. one tapped word in the video's language). */
+export async function speakIn(text: string, languageCode: string | null, outPath: string): Promise<string> {
+  await fs.writeFile(outPath, await tts(text, languageCode ? { languageCode } : {}));
+  return outPath;
+}
+
 /**
  * Speaks a summary that quotes another language: English parts with "en", quotes with the
  * video's language code, so "难追" sounds Mandarin instead of "nonjui". The parts are made in

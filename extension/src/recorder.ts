@@ -18,9 +18,10 @@ export class Recorder {
     return this.rec?.state === "recording";
   }
 
-  async stop(): Promise<{ audioBase64: string; durationSec: number }> {
+  /** `blob` is kept so you can play your take back next to the original. */
+  async stop(): Promise<{ audioBase64: string; durationSec: number; blob: Blob | null }> {
     const rec = this.rec;
-    if (!rec) return { audioBase64: "", durationSec: 0 };
+    if (!rec) return { audioBase64: "", durationSec: 0, blob: null };
     const durationSec = (performance.now() - this.startedAt) / 1000;
     await new Promise<void>((resolve) => {
       rec.onstop = () => resolve();
@@ -28,9 +29,10 @@ export class Recorder {
     });
     this.stream?.getTracks().forEach((t) => t.stop());
     this.rec = null;
-    const buf = new Uint8Array(await new Blob(this.chunks, { type: "audio/webm" }).arrayBuffer());
+    const blob = new Blob(this.chunks, { type: "audio/webm" });
+    const buf = new Uint8Array(await blob.arrayBuffer());
     let s = "";
     for (let i = 0; i < buf.length; i += 0x8000) s += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-    return { audioBase64: btoa(s), durationSec };
+    return { audioBase64: btoa(s), durationSec, blob: blob.size ? blob : null };
   }
 }

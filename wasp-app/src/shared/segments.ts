@@ -16,7 +16,14 @@ export function groupWords(words: Word[], maxGap = 0.8): Segment[] {
   let cur: Word[] = [];
   const flush = () => {
     if (!cur.length) return;
-    segs.push({ id: segs.length, start: cur[0].start, end: cur[cur.length - 1].end, text: joinWords(cur.map((w) => w.text)) });
+    segs.push({
+      id: segs.length,
+      start: cur[0].start,
+      end: cur[cur.length - 1].end,
+      text: joinWords(cur.map((w) => w.text)),
+      // Kept so the extension can highlight each word as it plays and play a single tapped word.
+      words: cur.map((w) => ({ text: w.text, start: w.start, end: w.end })),
+    });
     cur = [];
   };
   for (const w of words) {
