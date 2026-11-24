@@ -11,7 +11,11 @@ async function post(path: string, body: unknown): Promise<unknown> {
     headers: { "content-type": "application/json", "x-demo-key": DEMO_KEY },
     body: JSON.stringify(body ?? {}),
     signal: AbortSignal.timeout(
-      path === "/ext/shadow" ? SHADOW_TIMEOUT_MS : path === "/ext/explain" ? EXPLAIN_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+      path === "/ext/shadow"
+        ? SHADOW_TIMEOUT_MS
+        : path === "/ext/explain" || path === "/ext/explain-rest"
+          ? EXPLAIN_TIMEOUT_MS
+          : REQUEST_TIMEOUT_MS,
     ),
   });
   if (!res.ok) throw new Error(`${path} → HTTP ${res.status}`);
@@ -52,7 +56,9 @@ async function nearestExplain(body: ExplainBody): Promise<Explanation | null> {
 async function callApi(path: string, body: unknown): Promise<BgResponse> {
   try {
     const data = await post(path, body);
-    if (path === "/ext/explain") await cacheExplain(body as ExplainBody, data as Explanation);
+    // A voice-first (`partial`) answer isn't cached; the full one from /ext/explain-rest is.
+    if ((path === "/ext/explain" && !(data as Explanation).partial) || path === "/ext/explain-rest")
+      await cacheExplain(body as ExplainBody, data as Explanation);
     if (path === "/ext/session" && (data as { status?: string }).status === "ready")
       await store.set(`session:${(body as { videoId: string }).videoId}`, data);
     return { ok: true, data };

@@ -225,6 +225,8 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
   background-size: 200% 100%; animation: shimmer 1.2s linear infinite; }
 .sk.w80 { width: 80% } .sk.w60 { width: 60% } .sk.w40 { width: 40% }
 .skel { display: flex; flex-direction: column; gap: .6em; padding-top: .2em; }
+.slot { display: contents; }
+.card .skel { gap: .45em; padding-top: .1em; }
 
 /* Sketched buttons: uneven pencil outline with a faint second stroke */
 .btn { all: unset; position: relative; cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .4em; white-space: nowrap;
@@ -342,6 +344,8 @@ export class Overlay {
   private voiceRate = 1;
   private clipRate = HEAR_IT_RATE;
   private ratePills: HTMLDivElement[] = [];
+  /** Where a voice-first (`partial`) explanation's translation, notes and previous line go later. */
+  private slots: { top: HTMLElement; notes: HTMLElement; prev: HTMLElement } | null = null;
   // three.js paper field
   private fx: Fx | null = null;
   private fxLoading = false;
@@ -560,6 +564,7 @@ export class Overlay {
     this.shadowBtns = [];
     this.hearBtns = [];
     this.ratePills = [];
+    this.slots = null;
 
     const i = e.lines.length - 1;
     if (i < 0) {
@@ -592,25 +597,57 @@ export class Overlay {
     }
     const result = h("div", "result");
     this.results[i] = result;
+    // Slots (display: contents) so a voice-first explanation can fill these in without
+    // re-rendering the buttons, e.g. while you're holding to shadow.
+    const slots = { top: h("div", "slot"), notes: h("div", "slot"), prev: h("div", "slot") };
     const card = h(
       "div",
       "card",
       h("div", "tag", "Just said"),
       h("div", "orig", line.original),
-      line.romanization && h("div", "rom", line.romanization),
-      line.translation && h("div", "en", line.translation),
+      slots.top,
       actions.childElementCount > 0 && actions,
       result,
-      line.notes.length > 0 && h("ul", "notes", ...line.notes.map((n) => h("li", "", n))),
+      slots.notes,
     );
-    const prev = i > 0 ? e.lines[i - 1] : null;
-    const kids: Node[] = [card];
-    if (prev)
-      kids.push(h("div", "prev", h("div", "o", prev.original), prev.romanization && h("div", "r", prev.romanization), prev.translation && h("div", "t", prev.translation)));
-    this.focusEl?.replaceChildren(...kids);
+    this.slots = slots;
+    this.fillSlots(e, !!e.partial);
+    this.focusEl?.replaceChildren(card, slots.prev);
 
     this.glyphs = glyphsFor(e.lines);
     this.fx?.setGlyphs(this.glyphs);
+  }
+
+  /**
+   * The rest of a voice-first explanation arrived: fill in translations and notes in place.
+   * `null`: it couldn't be fetched, so just drop the placeholder.
+   */
+  details(e: Explanation | null): void {
+    if (!this.open || !this.slots) return;
+    if (e?.lines.length) this.fillSlots(e, false);
+    else this.slots.top.querySelector(".skel")?.remove();
+  }
+
+  private fillSlots(e: Explanation, pending: boolean): void {
+    const s = this.slots;
+    const i = e.lines.length - 1;
+    if (!s || i < 0) return;
+    const line = e.lines[i];
+    // Still being written: a sketch where the translation goes (unless an earlier pause saved one).
+    const waiting = pending && !line.translation;
+    s.top.replaceChildren(
+      ...[
+        line.romanization && h("div", "rom", line.romanization),
+        waiting ? h("div", "skel", h("div", "sk w80"), h("div", "sk w60")) : line.translation && h("div", "en", line.translation),
+      ].filter((n): n is HTMLDivElement => !!n),
+    );
+    s.notes.replaceChildren(...(line.notes.length > 0 ? [h("ul", "notes", ...line.notes.map((n) => h("li", "", n)))] : []));
+    const prev = i > 0 ? e.lines[i - 1] : null;
+    s.prev.replaceChildren(
+      ...(prev
+        ? [h("div", "prev", h("div", "o", prev.original), prev.romanization && h("div", "r", prev.romanization), prev.translation && h("div", "t", prev.translation))]
+        : []),
+    );
   }
 
   speaking(on: boolean): void {
