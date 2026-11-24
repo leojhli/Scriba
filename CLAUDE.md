@@ -97,6 +97,7 @@ On pause, a **right-hand sidebar drawn as an unrolled paper scroll** slides in o
 - **Toolbar button** opens the deck (`chrome.action.onClicked` in `background.ts`).
 - **Pencil look:** outlines are drawn on pseudo-elements through two SVG noise-displacement filters (`#sk1`, `#sk2`, defined inside the shadow root in the extension and by `SketchDefs.tsx` on the web pages), so lines wobble like pencil with a faint second stroke; text is never filtered. Orange buttons use a hatched marker fill.
 - **Web pages match:** `/`, `/deck` and `/practice` (`study.css`) use the same paper desk, Scriba header, sketched slips and hatched buttons; `/practice` puts the card on the same scroll (rolls, ribbon) with a score ring and progress dots. The tab title and favicon are Scriba (`main.wasp`).
+- **Delete a card (added 2026-11-23):** each deck card has a sketched × in its top-right corner; on hover or keyboard focus, "Delete" unrolls to its left. Clicking it hides the card at once and calls the `deleteCard` action, which deletes that line's Moments and ShadowAttempts for the demo user (a later pause on the line starts a fresh card). No confirm step. If the call fails, the card comes back with an error line. The card is now a `div.card` holding the YouTube link (`a.card-link`) and the button side by side, because a button can't sit inside a link.
 - Superseded on the way: a full-window page, then a full-video frosted overlay. Screens of each are in git history (`a57ce75`).
 
 ## Scope decision: pause is the only signal
@@ -233,7 +234,7 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 | `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. |
 | `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
 
-Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, and `submitShadow` (action), which uses the same scoring as `/ext/shadow`.
+Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, and `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`.
 
 **Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com.
 

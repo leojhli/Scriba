@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { GetDeck, SubmitShadow } from "wasp/server/operations";
+import { HttpError } from "wasp/server";
+import type { DeleteCard, GetDeck, SubmitShadow } from "wasp/server/operations";
 import type { ShadowResult } from "../shared/types";
 import { getDemoUserId } from "./demoUser";
 import { scoreAttempt, type ShadowInput } from "./shadow";
@@ -74,6 +75,24 @@ export const getDeck: GetDeck<void, DeckCard[]> = async (_args, context) => {
   return cards.sort(
     (a, b) => b.pauses - a.pauses || (last.get(`${b.videoId}:${b.segmentId}`) ?? 0) - (last.get(`${a.videoId}:${a.segmentId}`) ?? 0),
   );
+};
+
+export type DeleteCardInput = { videoId: string; segmentId: number };
+
+/**
+ * The × on a deck card: forget that line. A card is the demo user's pauses on one line, so
+ * deleting its Moments removes it; its practice attempts go too, so a later pause on the same
+ * line starts a fresh card instead of bringing back the old best score.
+ */
+export const deleteCard: DeleteCard<DeleteCardInput, { deleted: number }> = async (args, context) => {
+  const { videoId, segmentId } = (args ?? {}) as Partial<DeleteCardInput>;
+  if (typeof videoId !== "string" || !videoId || !Number.isInteger(segmentId)) {
+    throw new HttpError(400, "videoId and segmentId are required");
+  }
+  const where = { userId: await getDemoUserId(), videoId, segmentId: segmentId as number };
+  const { count } = await context.entities.Moment.deleteMany({ where });
+  await context.entities.ShadowAttempt.deleteMany({ where });
+  return { deleted: count };
 };
 
 /** Shadowing from /practice: same scoring path as /ext/shadow. */
