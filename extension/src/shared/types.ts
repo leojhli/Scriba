@@ -16,6 +16,11 @@ export type Explanation = {
   }[];
   /** Set when this came from a cache because the server or an API was down (Task 8). */
   offline?: boolean;
+  /**
+   * The voice arrived first: `summary` and `audioUrl` are final, but the lines' translations and
+   * notes are still being written. POST /ext/explain-rest { videoId, t } returns the full one.
+   */
+  partial?: boolean;
 };
 
 export type ShadowResult = {

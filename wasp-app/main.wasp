@@ -78,6 +78,14 @@ api extExplain {
   auth: false
 }
 
+// { videoId, t } → the full Explanation, when /ext/explain answered `partial: true` (voice first)
+api extExplainRest {
+  fn: import { extExplainRest } from "@src/server/explain",
+  httpRoute: (POST, "/ext/explain-rest"),
+  entities: [Video],
+  auth: false
+}
+
 // Task 6: { videoId, segmentId, audioBase64, durationSec } → ShadowResult
 api extShadow {
   fn: import { extShadow } from "@src/server/shadow",

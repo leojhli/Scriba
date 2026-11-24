@@ -48,7 +48,7 @@ Opening a new video to "Ready" went from ~60–70 s to **~14 s on the server, ~1
 
 ## Explain latency (measured 2026-11-22)
 
-The server logs `[explain] <id>@<t>s claude=…ms tts=…ms total=…ms` for every pause.
+The measurements below are from before voice-first (see the next section).
 
 | Step | Time | Share |
 |---|---|---|
@@ -58,11 +58,18 @@ The server logs `[explain] <id>@<t>s claude=…ms tts=…ms total=…ms` for eve
 
 Benchmark, median of 3: Sonnet 5.5 takes 4.3 s in total, but the `summary` (written first) is complete after 1.6 s when streamed. Haiku 5.5 takes 2.9 s in total, with the summary ready at 1.3 s.
 
-Speed-up options, not implemented yet:
-1. Stream Claude and start TTS as soon as the summary is done. This saves ~0.6 s with no change in quality.
-2. Two-phase response: voice + summary first (~2.5 s after the pause), with translations and notes filling in afterwards.
+Speed-up options 1 and 2 are now built (next section). Still open:
 3. Use Haiku 5.5, saving ~1.4 s at some cost in quality.
 4. Pre-generate explanations for every line right after ingest. Pauses then feel instant, at the cost of Claude + TTS credits for every line.
+
+## Voice first (built 2026-11-23, branch `feat/faster-pauses`)
+
+A pause now speaks once the summary is done, without waiting for the translations. Expected ~2.5 s from pause to voice (summary ~1.6 s + TTS ~0.6 s), down from ~5.5–7 s. **Not measured live yet:** it was built on a machine without API keys.
+- **Server (`explain.ts`):** Claude is streamed (`beta.messages.stream`). `completedStrings()` (`src/shared/partialJson.ts`, unit-tested) reads the top-level string fields that have finished streaming; when `summary` is complete, TTS starts while Claude keeps writing the lines. `/ext/explain` answers as soon as the voice is ready, with `partial: true`: the summary and audio are final, and the lines carry only translations an earlier pause saved. The full explanation stays in memory for 2 minutes and is saved to `explain-cache.json` / `translations.json` as before.
+- **`/ext/explain-rest` `{ videoId, t }`** returns the full explanation: it waits for the in-flight one, or reads the cache. 404 if neither exists.
+- **Extension:** on a `partial` answer it starts the voice and calls `/ext/explain-rest` at the same time. The overlay shows a sketch placeholder where the translation goes and fills in the translation, notes and previous line in place (`overlay.details()`), without re-rendering the buttons, so a shadowing take in progress isn't interrupted. If the rest fails, the placeholder is removed. Only full explanations go into the extension's offline cache.
+- **Failures:** if Claude fails before the summary, the answer is the offline one, as before (not partial). If it fails after the voice, the rest returns the voice's summary with any known translations.
+- **Log:** `[explain] <id>@<t>s voice ready at …ms (summary …ms), details to follow`, then `[explain] <id>@<t>s summary=…ms voice=…ms claude=…ms total=…ms`.
 
 ## Any language (decided 2026-11-22)
 
@@ -78,7 +85,7 @@ The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** 
 
 The voice explains **the line just said, at that moment in the video**: what it means there (who it's aimed at, what it refers to, the joke, feeling or subtext), plus the one thing worth learning. A quick bit of plot recap to set it up is fine (user's call), but no overview of the whole video or song. Claude also gets `background`: up to 20 earlier lines (never later ones) plus the title, which it reads but doesn't translate. The summary limit is 45 words.
 
-**Cost:** romanization and context made Claude ~1.5 s slower (4.9–5.8 s), so a pause now takes ~5.5–7 s in total. Streaming the summary first (option 1 or 2 under "Explain latency") would win that back.
+**Cost:** romanization and context made Claude ~1.5 s slower (4.9–5.8 s), so a pause took ~5.5–7 s in total. "Voice first" now speaks before the translations are written, which should win that back.
 
 **Voice speed:** the pill next to the × in the panel header cycles 0.75× → 1× → 1.25× → 1.5× → 2× (`extension/src/voiceRate.ts`). It applies at once, even mid-sentence, with pitch preserved, and is saved in `chrome.storage.local`, so it carries over to every video and tab. Each tab tags its own writes so a late storage echo can't undo a newer click.
 
@@ -132,7 +139,7 @@ demo-cache/  pre-processed data for the 2 demo videos (Task 8, not created yet)
   - `/ext/shadow` also accepts `text` and `origDur`, so captions-only lines (`segmentId: -1`) can be scored before Scribe is ready. Those attempts aren't saved.
   - **No innerHTML in the extension:** YouTube enforces Trusted Types, so the overlay builds its DOM with a small `h()` helper and styles via `adoptedStyleSheets`. Clicks inside the bubble call `stopPropagation()` so they don't toggle YouTube's play/pause.
   - Media goes from the background worker to the content script as base64, and the content script turns it into a `blob:` URL. Service workers can't create blob URLs.
-  - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 5.5 s timeout. TTS uses **Hope** ("Hope - upbeat and clear", library voice `tnSpp4vdxKPjI9w0GnoV`; switched from the stock voice George `JBFqnCBsd6RMkjVDRZzb` on 2026-11-22, same ~0.35 s latency) with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
+  - Claude call: `claude-sonnet-5-5` on the beta endpoint, with structured JSON output, `thinking: between_tools` (off, for latency), `effort: low`, server-side refusal `fallbacks: "default"`, and a 10 s timeout. It's streamed (see "Voice first"). TTS uses **Hope** ("Hope - upbeat and clear", library voice `tnSpp4vdxKPjI9w0GnoV`; switched from the stock voice George `JBFqnCBsd6RMkjVDRZzb` on 2026-11-22, same ~0.35 s latency) with `eleven_flash_v2_5`. Scribe uses `scribe_v2`. All can be overridden with env vars (`CLAUDE_MODEL`, `ELEVENLABS_VOICE_ID`, `ELEVENLABS_TTS_MODEL`, `ELEVENLABS_SCRIBE_MODEL`).
   - **Titles come from yt-dlp** (`--print after_move:title`), because the YouTube page title is stale right after in-app navigation. Before this fix, titles were off by one video.
   - **Re-ingest:** clears the old line data (`segments` set to null, `explain-*`, `translations.json`), because line ids change.
   - **Status chip:** the extension shows "Listening to the first 3 minutes…", then "Ready · pause anytime", then "Couldn't process…" or "Can't reach the server". Past 3:00, explain falls back to captions and says so if CC is off.
@@ -221,7 +228,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 export type Segment = { id: number; start: number; end: number; text: string }
 export type Explanation = { summary: string; audioUrl: string | null;
   lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
-  offline?: boolean }
+  offline?: boolean; partial?: boolean }
 export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number }
 ```
 
@@ -231,7 +238,8 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 |---|---|---|
 | `/ext/ping` | `{}` | `{ ok: true }` (Task 0 smoke test) |
 | `/ext/session` | `{ videoId, title }` | `{ status: "processing" \| "ready" \| "failed", segments: Segment[] \| null, hasDialogue: boolean }`. Starts ingest on the first call; the extension polls every 5 s. |
-| `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. |
+| `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. May be `partial: true` (voice first, translations still coming). |
+| `/ext/explain-rest` | `{ videoId, t }` | The full `Explanation` for a pause that came back `partial`; 404 if there's none. |
 | `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
 
 Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, and `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`.

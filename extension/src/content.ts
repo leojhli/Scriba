@@ -155,6 +155,8 @@ async function explain(video: HTMLVideoElement): Promise<void> {
     // No lines and not "Still listening…" (the server says that while processing with no captions).
     asleep: !((!session || session.status === "processing") && !captionLines.length),
   }, t);
+  // Voice first: the translations and notes are still being written; fetch them while it talks.
+  if (e.partial) void fillDetails(video, seq, t);
 
   if (e.audioUrl) {
     const url = await mediaUrl(e.audioUrl);
@@ -169,6 +171,19 @@ async function explain(video: HTMLVideoElement): Promise<void> {
     s.addEventListener("playing", () => log(`voice: ${s.duration.toFixed(1)}s of audio at ${rateLabel(s.playbackRate)}`), { once: true });
     s.play().catch((err) => log("voice blocked", err));
   }
+}
+
+async function fillDetails(video: HTMLVideoElement, seq: number, t: number): Promise<void> {
+  const t0 = performance.now();
+  const res = await api<Explanation>("/ext/explain-rest", { videoId, t });
+  if (seq !== explainSeq || !video.paused || isAdShowing()) return;
+  if (!res.ok) {
+    log("details failed", res.error);
+    return overlay.details(null);
+  }
+  log(`details: +${Math.round(performance.now() - t0)}ms after the voice`);
+  overlay.details(res.data);
+  if (res.offline || res.data.offline) overlay.offline(true);
 }
 
 // ---------- Voice speed (the pill in the panel header) ----------

@@ -1,9 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
-import type { ExtExplain } from "wasp/server/api";
+import type { ExtExplain, ExtExplainRest } from "wasp/server/api";
+import { completedStrings } from "../shared/partialJson";
 import { displaySummary, hasNonLatin, speechParts } from "../shared/text";
-import type { SpeechPart } from "../shared/text";
 import type { Explanation } from "../shared/types";
 import { window as segWindow } from "../shared/window";
 import { checkDemoKey } from "./demoKey";
@@ -13,7 +13,9 @@ import { readJson, videoDir, writeJson } from "./paths";
 import { getVideo, readTranslations, translationsFile, videoLanguage } from "./videos";
 
 const MODEL = process.env.CLAUDE_MODEL ?? "claude-sonnet-5-5";
-const CLAUDE_TIMEOUT_MS = 10_000; // ~4 s typical for 3 lines; TTS adds ~1 s (extension waits 15 s)
+// ~4–6 s for the whole reply, but the voice starts once "summary" is done (~1.5 s in) and the
+// extension gets it right after TTS; the translations follow via /ext/explain-rest.
+const CLAUDE_TIMEOUT_MS = 10_000;
 const MAX_LINES = 3; // the last few lines keep it fast and focused
 const PROCESSED_S = 180; // ingest downloads "*0:00-3:00"
 const BACKGROUND_LINES = 20; // earlier lines Claude reads (not shown) to understand the moment
@@ -62,8 +64,18 @@ function claude(): Anthropic {
   return (anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS }));
 }
 
-/** The last line is the one the learner paused on; the voice explains only that one. */
-async function askClaude(lines: Line[], title: string, language: string | null, background: string[]): Promise<ClaudeOut> {
+/**
+ * The last line is the one the learner paused on; the voice explains only that one.
+ * Streams the reply and calls `onSummary` once, as soon as "summary" is complete (Claude writes it
+ * before the line translations), so the voice can be made while the rest is still being written.
+ */
+async function askClaude(
+  lines: Line[],
+  title: string,
+  language: string | null,
+  background: string[],
+  onSummary: (summary: string, language?: string) => void,
+): Promise<ClaudeOut> {
   const last = lines.length - 1;
   const user = JSON.stringify({
     video: title,
@@ -72,8 +84,9 @@ async function askClaude(lines: Line[], title: string, language: string | null, 
     context: lines.slice(0, last).map((l, index) => ({ index, text: l.text })),
     justSaid: { index: last, text: lines[last].text },
   });
+  let told = false;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const msg = await claude().beta.messages.create({
+    const stream = claude().beta.messages.stream({
       model: MODEL,
       max_tokens: 1500,
       system: SYSTEM,
@@ -83,6 +96,16 @@ async function askClaude(lines: Line[], title: string, language: string | null, 
       fallbacks: "default",
       messages: [{ role: "user", content: user }],
     });
+    let sofar = "";
+    stream.on("text", (delta) => {
+      if (told) return;
+      sofar += delta;
+      const f = completedStrings(sofar);
+      if (f.summary === undefined) return;
+      told = true;
+      onSummary(f.summary, f.language);
+    });
+    const msg = await stream.finalMessage();
     if (msg.stop_reason === "refusal") throw new Error("Claude declined");
     const text = msg.content.flatMap((b) => (b.type === "text" ? [b.text] : [])).join("");
     try {
@@ -167,80 +190,169 @@ export const extExplain: ExtExplain = async (req, res) => {
   const background = earlier.filter((s) => s.start < lines[0].start).slice(-BACKGROUND_LINES).map((s) => s.text);
 
   const key = String(Math.round(t));
-  const t0 = Date.now();
-  let tClaude = 0;
-  let explanation: Explanation;
-  let speech: SpeechPart[] = [];
-  let speechLang: string | null = null;
-  try {
-    const out = await askClaude(lines, video?.title ?? videoId, videoLanguage(videoId), background);
-    const byIndex = new Map(out.lines.map((l) => [l.index, l]));
-    speech = speechParts(out.summary);
-    speechLang = ttsLanguage(out.language, videoLanguage(videoId));
-    explanation = {
-      summary: displaySummary(out.summary),
-      audioUrl: null,
-      lines: lines.map((l, i) => {
-        const o = byIndex.get(i) ?? out.lines[i];
-        // Only lines that actually have non-Latin letters get one (the model may echo Latin lines).
-        const romanization = hasNonLatin(l.text) ? o?.romanization?.trim() : "";
-        return {
-          segmentId: l.segmentId,
-          original: l.text,
-          ...(romanization ? { romanization } : {}),
-          translation: o?.translation ?? "",
-          notes: o?.notes ?? [],
-        };
-      }),
-    };
-    tClaude = Date.now() - t0;
-  } catch (e) {
-    console.error("[explain] Claude failed, using cache", e);
-    const cached = cachedFor(videoId, lines);
-    if (cached) {
-      res.json({ ...cached, offline: true } satisfies Explanation);
-      return;
-    }
-    // No explanation of this exact line cached: show the lines with any translations we know.
-    const tr = readTranslations(videoId);
-    const known = lines.map((l) => ({
-      segmentId: l.segmentId,
-      original: l.text,
-      romanization: tr[l.segmentId]?.romanization,
-      translation: tr[l.segmentId]?.translation ?? "",
-      notes: tr[l.segmentId]?.notes ?? [],
-    }));
-    const just = known[known.length - 1].translation;
-    res.json({
-      summary: just ? `I'm offline, but that line means: “${just}”` : "I'm offline right now, but here are the lines.",
-      audioUrl: null,
-      offline: true,
-      lines: known,
-    } satisfies Explanation);
+  const job = explainInTwoPhases(videoId, key, lines, video?.title ?? videoId, background);
+  const first = await job.first;
+  if (first.partial) {
+    // The extension asks for the rest right away; keep it around for a while in case it's slow.
+    const id = pendingId(videoId, key);
+    pending.set(id, job.full);
+    setTimeout(() => pending.get(id) === job.full && pending.delete(id), PENDING_KEEP_MS);
+  }
+  res.json(first);
+};
+
+/** POST /ext/explain-rest { videoId, t } → the full Explanation for a pause /ext/explain answered `partial`. */
+export const extExplainRest: ExtExplainRest = async (req, res) => {
+  if (!checkDemoKey(req, res)) return;
+  const { videoId, t } = (req.body ?? {}) as { videoId?: string; t?: number };
+  if (!videoId || typeof t !== "number") {
+    res.status(400).json({ error: "videoId and t required" });
     return;
   }
-
-  const t1 = Date.now();
-  try {
-    const file = `explain-${key}.mp3`;
-    await speakMixed(speech, speechLang, path.join(videoDir(videoId), file));
-    explanation.audioUrl = `/media/${videoId}/${file}`;
-  } catch (e) {
-    console.error("[explain] TTS failed", e);
+  const key = String(Math.round(t));
+  const job = pending.get(pendingId(videoId, key));
+  if (job) {
+    res.json(await job);
+    return;
   }
-  console.log(`[explain] ${videoId}@${key}s claude=${tClaude}ms tts=${Date.now() - t1}ms total=${Date.now() - t0}ms`);
+  // Already finished and dropped from memory (or the server restarted): it was saved to the cache.
+  const cached = readJson<Cache>(cacheFile(videoId), {})[key];
+  if (cached) res.json(cached);
+  else res.status(404).json({ error: "no explanation for that moment" });
+};
 
-  // Persist: translations for /deck + /practice, and the explanation for offline fallback.
+const PENDING_KEEP_MS = 2 * 60_000;
+const pending = new Map<string, Promise<Explanation>>();
+const pendingId = (videoId: string, key: string) => `${videoId}@${key}`;
+
+type Voice = { summary: string; audioUrl: string | null };
+
+/**
+ * `first` resolves as soon as the voice is ready (`partial`: translations still coming), or with
+ * the full explanation if that somehow finishes first. `full` resolves when Claude is done; it is
+ * saved for /deck, /practice and offline use. Neither ever rejects: failures become the offline
+ * explanation.
+ */
+function explainInTwoPhases(
+  videoId: string,
+  key: string,
+  lines: Line[],
+  title: string,
+  background: string[],
+): { first: Promise<Explanation>; full: Promise<Explanation> } {
+  const t0 = Date.now();
+  const scribeLang = videoLanguage(videoId);
+  const ms = { summary: 0, voice: 0, claude: 0 };
+
+  const speak = async (raw: string, claudeLang: string | undefined): Promise<Voice> => {
+    const file = `explain-${key}.mp3`;
+    let audioUrl: string | null = null;
+    try {
+      await speakMixed(speechParts(raw), ttsLanguage(claudeLang, scribeLang), path.join(videoDir(videoId), file));
+      audioUrl = `/media/${videoId}/${file}`;
+    } catch (e) {
+      console.error("[explain] TTS failed", e);
+    }
+    ms.voice = Date.now() - t0;
+    return { summary: displaySummary(raw), audioUrl };
+  };
+
+  let voice: Promise<Voice> | null = null;
+  let voiceReady!: (v: Voice) => void;
+  const firstVoice = new Promise<Voice>((r) => (voiceReady = r));
+
+  const claudeDone = askClaude(lines, title, scribeLang, background, (summary, language) => {
+    ms.summary = Date.now() - t0;
+    voice = speak(summary, language);
+    void voice.then(voiceReady);
+  });
+
+  let settled: Explanation | null = null;
+  const full = claudeDone.then(
+    async (out) => {
+      ms.claude = Date.now() - t0;
+      voice ??= speak(out.summary, out.language); // the summary never streamed on its own
+      const v = await voice;
+      const byIndex = new Map(out.lines.map((l) => [l.index, l]));
+      const e: Explanation = {
+        summary: v.summary,
+        audioUrl: v.audioUrl,
+        lines: lines.map((l, i) => {
+          const o = byIndex.get(i) ?? out.lines[i];
+          // Only lines that actually have non-Latin letters get one (the model may echo Latin lines).
+          const romanization = hasNonLatin(l.text) ? o?.romanization?.trim() : "";
+          return {
+            segmentId: l.segmentId,
+            original: l.text,
+            ...(romanization ? { romanization } : {}),
+            translation: o?.translation ?? "",
+            notes: o?.notes ?? [],
+          };
+        }),
+      };
+      console.log(
+        `[explain] ${videoId}@${key}s summary=${ms.summary}ms voice=${ms.voice}ms claude=${ms.claude}ms total=${Date.now() - t0}ms`,
+      );
+      try {
+        save(videoId, key, e);
+      } catch (err) {
+        console.error("[explain] couldn't save", err);
+      }
+      return (settled = e);
+    },
+    async (err): Promise<Explanation> => {
+      console.error("[explain] Claude failed", err);
+      const v = voice ? await voice : null;
+      if (!v) {
+        const cached = cachedFor(videoId, lines);
+        if (cached) return (settled = { ...cached, offline: true });
+      }
+      return (settled = withKnownTranslations(videoId, lines, v));
+    },
+  );
+
+  const first = Promise.race([full, firstVoice]).then((r): Explanation => {
+    if ("lines" in r) return r; // Claude finished (or failed) before the voice was ready
+    if (settled) return settled;
+    console.log(`[explain] ${videoId}@${key}s voice ready at ${ms.voice}ms (summary ${ms.summary}ms), details to follow`);
+    return { ...withKnownTranslations(videoId, lines, r), partial: true };
+  });
+  return { first, full };
+}
+
+/**
+ * The lines with any translations an earlier pause already saved. With a voice: it's the voice's
+ * summary (Claude is fine, just not done, or failed after the summary). Without: the offline message.
+ */
+function withKnownTranslations(videoId: string, lines: Line[], voice: Voice | null): Explanation {
   const tr = readTranslations(videoId);
-  for (const l of explanation.lines)
+  const known = lines.map((l) => ({
+    segmentId: l.segmentId,
+    original: l.text,
+    ...(tr[l.segmentId]?.romanization ? { romanization: tr[l.segmentId].romanization } : {}),
+    translation: tr[l.segmentId]?.translation ?? "",
+    notes: tr[l.segmentId]?.notes ?? [],
+  }));
+  if (voice) return { ...voice, lines: known };
+  const just = known[known.length - 1].translation;
+  return {
+    summary: just ? `I'm offline, but that line means: “${just}”` : "I'm offline right now, but here are the lines.",
+    audioUrl: null,
+    offline: true,
+    lines: known,
+  };
+}
+
+/** Persist: translations for /deck + /practice, and the explanation for offline fallback. */
+function save(videoId: string, key: string, e: Explanation): void {
+  const tr = readTranslations(videoId);
+  for (const l of e.lines)
     if (l.segmentId >= 0) tr[l.segmentId] = { translation: l.translation, notes: l.notes, romanization: l.romanization };
   writeJson(translationsFile(videoId), tr);
   const cache = readJson<Cache>(cacheFile(videoId), {});
-  cache[key] = explanation;
+  cache[key] = e;
   writeJson(cacheFile(videoId), cache);
-
-  res.json(explanation);
-};
+}
 
 export function hasMedia(videoId: string, file: string): boolean {
   return fs.existsSync(path.join(videoDir(videoId), file));
