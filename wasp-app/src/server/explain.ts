@@ -125,7 +125,7 @@ const ISO3_TO_1: Record<string, string> = {
 };
 
 /** The code the foreign parts are spoken with: Claude's answer, else the language Scribe detected. */
-function ttsLanguage(fromClaude: string | undefined, fromScribe: string | null): string | null {
+export function ttsLanguage(fromClaude: string | undefined, fromScribe: string | null): string | null {
   const c = fromClaude?.trim().toLowerCase().slice(0, 2);
   if (c && /^[a-z]{2}$/.test(c)) return c;
   return (fromScribe && ISO3_TO_1[fromScribe]) || null;

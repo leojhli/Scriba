@@ -1,8 +1,9 @@
 // Background service worker: the only place that talks to the Wasp server.
 // host_permissions on localhost:3001 means no CORS setup is needed.
 // Every call has a timeout; explain/session fall back to chrome.storage caches (Task 8).
+import { loadEnabled, onEnabledChange } from "./enabled";
 import type { BgRequest, BgResponse, MediaResponse } from "./messages";
-import { DEMO_KEY, EXPLAIN_TIMEOUT_MS, MEDIA_TIMEOUT_MS, REQUEST_TIMEOUT_MS, SERVER_URL, SHADOW_TIMEOUT_MS, WEB_URL } from "./shared/config";
+import { DEMO_KEY, EXPLAIN_TIMEOUT_MS, MEDIA_TIMEOUT_MS, REQUEST_TIMEOUT_MS, SERVER_URL, SHADOW_TIMEOUT_MS } from "./shared/config";
 import type { Explanation } from "./shared/types";
 
 async function post(path: string, body: unknown): Promise<unknown> {
@@ -110,5 +111,12 @@ chrome.runtime.onMessage.addListener((msg: BgRequest, _sender, sendResponse) => 
   return false;
 });
 
-// The toolbar button opens your deck.
-chrome.action.onClicked.addListener(() => void chrome.tabs.create({ url: `${WEB_URL}/deck` }));
+// The toolbar button opens the popup (popup.html): the on/off switch plus links to the deck.
+// While Scriba is off, the icon wears an "off" badge so you can tell at a glance.
+function showEnabled(on: boolean): void {
+  void chrome.action.setBadgeText({ text: on ? "" : "off" });
+  void chrome.action.setBadgeBackgroundColor({ color: "#6f6158" });
+  void chrome.action.setTitle({ title: on ? "Scriba · on" : "Scriba · off" });
+}
+void loadEnabled().then(showEnabled);
+onEnabledChange(showEnabled);

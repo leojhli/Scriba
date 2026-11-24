@@ -6,8 +6,9 @@
 //   open). The rest of the video stays visible, and clicking it resumes playback as usual.
 // No innerHTML anywhere: YouTube enforces Trusted Types, so the DOM (and SVG) is built by hand.
 import { WEB_URL } from "./shared/config";
-import type { Explanation, ShadowResult } from "./shared/types";
+import type { Explanation, ShadowResult, WordGloss } from "./shared/types";
 import { CLIP_RATES, nextVoiceRate, rateLabel, shortRateLabel } from "./voiceRate";
+import { splitWords } from "./words";
 import { HEAR_IT_RATE } from "./shared/config";
 import type { Fx } from "./fx";
 
@@ -21,7 +22,16 @@ export type OverlayHandlers = {
   onResume(): void;
   onVoiceRate(rate: number): void;
   onClipRate(rate: number): void;
+  /** A word in the "Just said" line was tapped: `tok` indexes splitWords(line.original). */
+  onWord(line: Line, i: number, tok: number): void;
+  /** The play button on the word card. */
+  onWordPlay(): void;
+  /** After a shadowing take: play the original, your take, or both back to back. */
+  onCompare(line: Line, i: number, which: Compare): void;
 };
+
+export type Compare = "original" | "you" | "both";
+export type GlossState = { word: string; loading: true } | { word: string; gloss: WordGloss } | { word: string; error: string };
 
 type Kid = Node | string | null | false | undefined;
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, cls = "", ...kids: Kid[]): HTMLElementTagNameMap[K] {
@@ -39,6 +49,9 @@ const ICONS = {
   wifiOff: "M2 2l20 20M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5.2-2.8M19 13a10 10 0 0 0-2.2-1.6M12 20h.01",
   gauge: "m12 14 4-4M3.34 19a10 10 0 1 1 17.32 0",
   play: "M7 4.5v15l12.5-7.5z",
+  speaker: "M4 9v6h4l5 4V5L8 9H4Zm12.5-.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm-7 9a7 7 0 0 1 14 0",
+  swap: "M4 8h13l-3-3M20 16H7l3 3",
   deck: "M5 4h11a2 2 0 0 1 2 2v14l-7.5-4L3 20V6a2 2 0 0 1 2-2Z",
   star: "m12 3 2.7 5.6 6.1.8-4.4 4.3 1 6.1L12 16.9 6.6 19.8l1-6.1-4.4-4.3 6.1-.8Z",
 };
@@ -281,6 +294,33 @@ a.btn { text-decoration: none; }
 .w.wrong { background: rgba(255,214,102,.5); color: #7a5a00; }
 .w.extra { color: var(--muted); font-style: italic; }
 .pace, .status { color: var(--muted); font-size: .82em; }
+.compare:empty { display: none; }
+.compare { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; padding-top: .3em; }
+.compare .lbl { font-family: var(--hand); font-size: .8em; color: var(--muted); margin-right: .1em; }
+
+/* Words: highlighted as they're heard; the line's words can be tapped */
+.tok { border-radius: 4px; transition: background .12s; }
+.tok.now { background: linear-gradient(transparent 45%, rgba(255,163,60,.6) 45%); }
+.orig .tap { cursor: pointer; border-bottom: 1.5px dotted rgba(43,36,32,.25); }
+.orig .tap:hover { border-bottom-color: var(--shiba-deep); background: rgba(255,163,60,.15); }
+.orig .tap:focus-visible { outline: 2px dashed var(--shiba-deep); outline-offset: 1px; }
+.orig .tap.sel { background: rgba(255,163,60,.4); border-bottom-color: var(--shiba-deep); }
+.orig .tok.now { background: linear-gradient(transparent 35%, rgba(255,163,60,.7) 35%); }
+.hint { font-family: var(--hand); font-size: .72em; color: var(--muted); margin-left: .5em; font-weight: 400; }
+
+/* The word card under the line */
+.gloss { position: relative; display: flex; gap: .6em; align-items: flex-start; margin: .25em 0 .1em; padding: .5em .7em .55em;
+  background: rgba(255,252,246,.85); border-radius: 12px 15px 11px 16px / 15px 11px 16px 12px; animation: rise .25s ease-out both; }
+.gloss::before { content: ""; position: absolute; inset: 0; border: 1.5px solid var(--ink); border-radius: inherit; filter: url(#sk1); pointer-events: none; }
+.gloss .gbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: .1em; }
+.gloss .gw { font-family: var(--round); font-size: 1.12em; }
+.gloss .gl { color: var(--muted); font-size: .8em; margin-left: .4em; font-family: var(--hand); }
+.gloss .gr { color: var(--ribbon); font-weight: 600; font-size: .9em; }
+.gloss .gm { font-weight: 650; }
+.gloss .gn { font-family: var(--hand); font-size: .85em; color: #4a3f37; }
+.gloss .btn.icon { flex: none; }
+.gloss .x { all: unset; cursor: pointer; color: var(--muted); padding: 0 .2em; line-height: 1; }
+.gloss .x:hover { color: var(--ink); }
 
 /* Status chips (hidden while the scroll is open) */
 .chips { position: absolute; top: clamp(10px, 2cqh, 22px); left: clamp(10px, 1.6cqw, 22px); display: flex; gap: 8px; transition: opacity .2s; }
@@ -333,6 +373,15 @@ export class Overlay {
   private speedBtn: HTMLButtonElement | null = null;
   private offlineTag: HTMLSpanElement | null = null;
   private results: HTMLDivElement[] = [];
+  private compares: HTMLDivElement[] = [];
+  private compareBtns = new Map<Compare, HTMLButtonElement>();
+  /** Token spans of Scriba's note and of the "Just said" line, for highlighting and tapping. */
+  private summaryToks: HTMLElement[] = [];
+  private lineToks: HTMLElement[] = [];
+  private litSummary = -1;
+  private litLine = -1;
+  private glossSlot: HTMLElement | null = null;
+  private glossSel = -1;
   private shadowBtns: HTMLButtonElement[] = [];
   private hearBtns: HTMLButtonElement[] = [];
   private recTimer: ReturnType<typeof setInterval> | undefined;
@@ -475,10 +524,7 @@ export class Overlay {
     clearTimeout(this.closeTimer);
     clearInterval(this.recTimer);
     for (const el of this.content) el.remove();
-    this.results = [];
-    this.shadowBtns = [];
-    this.hearBtns = [];
-    this.ratePills = [];
+    this.resetLine();
 
     const face = h("img");
     face.src = MASCOT();
@@ -559,12 +605,11 @@ export class Overlay {
     this.bodyEl?.classList.toggle("asleep", asleep);
     if (this.dog) setPose(this.dog, asleep ? "sleeping" : "default");
     this.summaryEl?.classList.toggle("muted", !e.lines.length);
-    this.summaryEl?.replaceChildren(e.summary, h("span", "wave", h("i"), h("i"), h("i"), h("i")));
-    this.results = [];
-    this.shadowBtns = [];
-    this.hearBtns = [];
-    this.ratePills = [];
-    this.slots = null;
+    // One span per word, so each lights up as Scriba says it.
+    this.summaryToks = splitWords(e.summary).map((t) => h("span", t.word ? "tok" : "", t.text));
+    this.litSummary = -1;
+    this.summaryEl?.replaceChildren(...this.summaryToks, h("span", "wave", h("i"), h("i"), h("i"), h("i")));
+    this.resetLine();
 
     const i = e.lines.length - 1;
     if (i < 0) {
@@ -597,17 +642,40 @@ export class Overlay {
     }
     const result = h("div", "result");
     this.results[i] = result;
+    const compare = h("div", "compare");
+    this.compares[i] = compare;
+    // The line, one tappable span per word (any language: Chinese and Japanese are split into words too).
+    const orig = h("div", "orig");
+    this.lineToks = splitWords(line.original).map((t, k) => {
+      if (!t.word) return h("span", "", t.text);
+      const w = h("span", "tok tap", t.text);
+      w.tabIndex = 0;
+      w.setAttribute("role", "button");
+      w.title = "What does this word mean?";
+      const pick = () => this.handlers.onWord(line, i, k);
+      w.addEventListener("click", pick);
+      w.addEventListener("keydown", (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        pick();
+      });
+      return w;
+    });
+    orig.append(...this.lineToks);
+    this.glossSlot = h("div", "slot");
     // Slots (display: contents) so a voice-first explanation can fill these in without
     // re-rendering the buttons, e.g. while you're holding to shadow.
     const slots = { top: h("div", "slot"), notes: h("div", "slot"), prev: h("div", "slot") };
     const card = h(
       "div",
       "card",
-      h("div", "tag", "Just said"),
-      h("div", "orig", line.original),
+      h("div", "tag", "Just said", h("span", "hint", "· tap a word")),
+      orig,
       slots.top,
+      this.glossSlot,
       actions.childElementCount > 0 && actions,
       result,
+      compare,
       slots.notes,
     );
     this.slots = slots;
@@ -648,6 +716,113 @@ export class Overlay {
         ? [h("div", "prev", h("div", "o", prev.original), prev.romanization && h("div", "r", prev.romanization), prev.translation && h("div", "t", prev.translation))]
         : []),
     );
+  }
+
+  private resetLine(): void {
+    this.results = [];
+    this.compares = [];
+    this.compareBtns.clear();
+    this.shadowBtns = [];
+    this.hearBtns = [];
+    this.ratePills = [];
+    this.slots = null;
+    this.lineToks = [];
+    this.litLine = -1;
+    this.glossSlot = null;
+    this.glossSel = -1;
+  }
+
+  // ---------- Words lit as they're heard ----------
+
+  /** Lights word `k` of Scriba's note (an index into splitWords(summary)); -1 clears it. */
+  highlightSummary(k: number): void {
+    if (k === this.litSummary) return;
+    this.summaryToks[this.litSummary]?.classList.remove("now");
+    this.summaryToks[k]?.classList.add("now");
+    this.litSummary = k;
+  }
+
+  /** Lights word `k` of the "Just said" line (an index into splitWords(line.original)); -1 clears it. */
+  highlightLine(k: number): void {
+    if (k === this.litLine) return;
+    this.lineToks[this.litLine]?.classList.remove("now");
+    this.lineToks[k]?.classList.add("now");
+    this.litLine = k;
+  }
+
+  // ---------- Tap a word ----------
+
+  /** The word card under the line for token `k`; null closes it. */
+  gloss(k: number, state: GlossState | null, canPlay = false): void {
+    const slot = this.glossSlot;
+    if (!slot) return;
+    // An answer for a card that was closed, or for a word since replaced by another tap.
+    if (state && !("loading" in state) && this.glossSel !== k) return;
+    this.lineToks[this.glossSel]?.classList.remove("sel");
+    this.glossSel = state ? k : -1;
+    if (!state) {
+      slot.replaceChildren();
+      return;
+    }
+    this.lineToks[k]?.classList.add("sel");
+    const body = h("div", "gbody");
+    if ("gloss" in state) {
+      const g = state.gloss;
+      for (const kid of [
+        h("div", "", h("span", "gw", g.word), g.lemma && h("span", "gl", `from ${g.lemma}`)),
+        g.romanization && h("div", "gr", g.romanization),
+        h("div", "gm", g.meaning),
+        g.note && h("div", "gn", g.note),
+      ])
+        if (kid) body.append(kid);
+    } else {
+      body.append(
+        h("div", "gw", state.word),
+        "error" in state ? h("div", "gn", state.error) : h("div", "skel", h("div", "sk w60"), h("div", "sk w40")),
+      );
+    }
+    const kids: Node[] = [];
+    if (canPlay) {
+      const play = h("button", "btn icon", icon("speaker"));
+      play.title = "Hear this word";
+      play.setAttribute("aria-label", `Hear “${state.word}”`);
+      play.addEventListener("click", () => this.handlers.onWordPlay());
+      kids.push(play);
+    }
+    const x = h("button", "x", "×");
+    x.title = "Close";
+    x.setAttribute("aria-label", "Close word card");
+    x.addEventListener("click", () => this.gloss(k, null));
+    slot.replaceChildren(h("div", "gloss", ...kids, body, x));
+  }
+
+  // ---------- Compare your take with the original ----------
+
+  /** After a shadowing take: buttons to play the original, your take, or both back to back. */
+  takeReady(i: number, line: Line, hasOriginal: boolean): void {
+    const row = this.compares[i];
+    if (!row) return;
+    this.compareBtns.clear();
+    const btn = (which: Compare, ico: keyof typeof ICONS, label: string, tip: string) => {
+      const b = h("button", "btn", icon(ico), label);
+      b.title = tip;
+      b.addEventListener("click", () => this.handlers.onCompare(line, i, which));
+      this.compareBtns.set(which, b);
+      return b;
+    };
+    row.replaceChildren(
+      ...[
+        h("span", "lbl", "Compare:"),
+        hasOriginal && btn("original", "headphones", "Original", "The line from the video, voice only"),
+        btn("you", "user", "You", "Your take"),
+        hasOriginal && btn("both", "swap", "Back to back", "The original, then your take"),
+      ].filter((n): n is HTMLElement => !!n),
+    );
+  }
+
+  /** Marks which compare button is playing; null when nothing is. */
+  comparing(which: Compare | null): void {
+    for (const [k, b] of this.compareBtns) b.classList.toggle("playing", k === which);
   }
 
   speaking(on: boolean): void {
@@ -792,6 +967,9 @@ export class Overlay {
     this.dog = null;
     this.sayEl = null;
     this.summaryEl = null;
+    this.summaryToks = [];
+    this.litSummary = -1;
+    this.resetLine();
     this.focusEl = null;
     this.bodyEl = null;
     this.speedBtn = null;

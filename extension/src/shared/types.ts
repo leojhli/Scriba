@@ -1,7 +1,14 @@
 // Shared contract between the extension and the Wasp app.
 // Keep identical to wasp-app/src/shared/types.ts.
 
-export type Segment = { id: number; start: number; end: number; text: string };
+export type Segment = {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  /** Scribe's word timings (seconds), so the overlay can highlight and play single words. Older transcripts don't have them. */
+  words?: { text: string; start: number; end: number }[];
+};
 
 export type Explanation = {
   summary: string;
@@ -27,4 +34,17 @@ export type ShadowResult = {
   diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[];
   accuracy: number;
   paceRatio: number;
+};
+
+/** POST /ext/word: one tapped word, explained in the line it came from. */
+export type WordGloss = {
+  word: string;
+  /** Dictionary form when it differs (e.g. "querer" for "quiero"). */
+  lemma?: string;
+  romanization?: string;
+  /** What the word means in this line, in English. */
+  meaning: string;
+  note?: string;
+  /** The word spoken on its own, when the video's own audio can't play it cleanly. */
+  audioUrl: string | null;
 };

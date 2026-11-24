@@ -86,6 +86,14 @@ api extExplainRest {
   auth: false
 }
 
+// { videoId, segmentId, line, word, index } → WordGloss (tap a word in the overlay)
+api extWord {
+  fn: import { extWord } from "@src/server/word",
+  httpRoute: (POST, "/ext/word"),
+  entities: [Video],
+  auth: false
+}
+
 // Task 6: { videoId, segmentId, audioBase64, durationSec } → ShadowResult
 api extShadow {
   fn: import { extShadow } from "@src/server/shadow",

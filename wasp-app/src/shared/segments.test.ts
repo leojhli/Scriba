@@ -24,6 +24,11 @@ describe("groupWords", () => {
     expect(s.map((x) => x.text)).toEqual(["唱歌，", "跳舞，"]);
   });
 
+  it("keeps each line's word timings", () => {
+    const s = groupWords([w("Hola", 0, 0.3), w("amigo.", 0.4, 0.8)]);
+    expect(s[0].words).toEqual([w("Hola", 0, 0.3), w("amigo.", 0.4, 0.8)]);
+  });
+
   it("keeps a short line together across commas", () => {
     expect(groupWords([w("Hola,", 0, 0.5), w("amigo", 0.6, 1)]).map((x) => x.text)).toEqual(["Hola, amigo"]);
   });
