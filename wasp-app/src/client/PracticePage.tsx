@@ -1,4 +1,4 @@
-import { type CSSProperties, useRef, useState } from "react";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { config } from "wasp/client";
 import { getDeck, submitShadow, useQuery } from "wasp/client/operations";
 import { Link } from "wasp/client/router";
@@ -6,6 +6,8 @@ import type { ShadowResult } from "../shared/types";
 import "./Main.css";
 import "./study.css";
 import { SketchDefs } from "./SketchDefs";
+import { playSound, stopSound } from "./sound";
+import { TappableLine } from "./WordTaps";
 
 const RATE = 0.75;
 
@@ -16,18 +18,24 @@ async function blobToBase64(b: Blob): Promise<string> {
   return btoa(s);
 }
 
+const keyOf = (c: { videoId: string; segmentId: number }) => `${c.videoId}:${c.segmentId}`;
+
 // Task 7: step through the top 5 cards — hear the clip, read the translation, shadow it.
+// From a deck card (/practice?card=<videoId>:<segmentId>), that card comes first.
 export function PracticePage() {
   const { data: cards, isLoading } = useQuery(getDeck);
+  const [want] = useState(() => new URLSearchParams(window.location.search).get("card"));
   const [i, setI] = useState(0);
   const [recording, setRecording] = useState(false);
   const [scoring, setScoring] = useState(false);
   const [result, setResult] = useState<(ShadowResult & { heard: string }) | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const rec = useRef<{ mr: MediaRecorder; chunks: Blob[]; t0: number; stream: MediaStream } | null>(null);
-  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => stopSound, []);
 
-  const top = (cards ?? []).slice(0, 5);
+  const all = cards ?? [];
+  const chosen = want ? all.find((c) => keyOf(c) === want) : undefined;
+  const top = (chosen ? [chosen, ...all.filter((c) => c !== chosen)] : all).slice(0, 5);
   const card = top[i];
 
   if (isLoading) return <main className="study"><p className="sub">Loading…</p></main>;
@@ -45,24 +53,11 @@ export function PracticePage() {
       </main>
     );
 
-  const play = () => {
-    audio.current?.pause();
-    const a = new Audio(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`);
-    audio.current = a;
-    a.preservesPitch = true;
-    a.addEventListener(
-      "loadedmetadata",
-      () => {
-        a.currentTime = Math.max(0, card.start - 0.1);
-        a.defaultPlaybackRate = a.playbackRate = RATE;
-        void a.play();
-      },
-      { once: true },
-    );
-    a.addEventListener("timeupdate", () => a.currentTime >= card.end + 0.2 && a.pause());
-  };
+  const play = () =>
+    playSound(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`, { from: card.start - 0.1, to: card.end + 0.2, rate: RATE });
 
   const start = async () => {
+    stopSound(); // nothing playing into the take
     setErr(null);
     setResult(null);
     try {
@@ -101,7 +96,7 @@ export function PracticePage() {
   };
 
   const next = () => {
-    audio.current?.pause();
+    stopSound();
     setResult(null);
     setErr(null);
     setI((i + 1) % top.length);
@@ -131,10 +126,13 @@ export function PracticePage() {
         <div className="roll" />
         <div className="ribbon" />
         <div className="practice">
-          <div className="kicker">Just said</div>
-          <div className="line-es big">{card.text}</div>
-          {card.romanization && <div className="line-rom big">{card.romanization}</div>}
-          {card.translation ? <div className="line-en big">{card.translation}</div> : <div className="line-en muted">(no translation yet)</div>}
+          <div className="kicker">
+            Just said <span className="hint">· tap a word</span>
+          </div>
+          <TappableLine key={keyOf(card)} card={card} className="line-es big">
+            {card.romanization && <div className="line-rom big">{card.romanization}</div>}
+            {card.translation ? <div className="line-en big">{card.translation}</div> : <div className="line-en muted">(no translation yet)</div>}
+          </TappableLine>
 
           <div className="row">
             <button className="btn" onClick={play}>

@@ -17,6 +17,8 @@ export type DeckCard = {
   romanization: string;
   start: number;
   end: number;
+  /** Scribe's word timings (newer ingests), so a tapped word can be cut from the dialogue track. */
+  words?: { text: string; start: number; end: number }[];
   translation: string;
   notes: string[];
   pauses: number;
@@ -58,6 +60,7 @@ export const getDeck: GetDeck<void, DeckCard[]> = async (_args, context) => {
       romanization: tr?.romanization ?? "",
       start: seg.start,
       end: seg.end,
+      ...(seg.words?.length ? { words: seg.words } : {}),
       translation: tr?.translation ?? "",
       notes: tr?.notes ?? [],
       pauses: g.pauses,

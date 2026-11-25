@@ -1,6 +1,8 @@
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
+import { HttpError } from "wasp/server";
 import type { ExtWord } from "wasp/server/api";
+import type { GetWordGloss } from "wasp/server/operations";
 import { hasNonLatin } from "../shared/text";
 import type { WordGloss } from "../shared/types";
 import { checkDemoKey } from "./demoKey";
@@ -39,24 +41,50 @@ function claude(): Anthropic {
   return (anthropic ??= new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: TIMEOUT_MS }));
 }
 
-type Body = { videoId?: string; segmentId?: number; line?: string; word?: string; index?: number };
+export type WordInput = { videoId?: string; segmentId?: number; line?: string; word?: string; index?: number };
 type Cache = Record<string, WordGloss>;
 const cacheFile = (videoId: string) => path.join(videoDir(videoId), "words.json");
 
-/** POST /ext/word { videoId, segmentId, line, word, index } → WordGloss */
+/** A request that can't be answered: `status` 400 for bad input. */
+class WordError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** POST /ext/word { videoId, segmentId, line, word, index } → WordGloss (the scroll's "tap a word"). */
 export const extWord: ExtWord = async (req, res) => {
   if (!checkDemoKey(req, res)) return;
-  const { videoId, segmentId = -1, line, word, index = 0 } = (req.body ?? {}) as Body;
+  try {
+    res.json(await glossWord((req.body ?? {}) as WordInput));
+  } catch (e) {
+    if (e instanceof WordError) res.status(e.status).json({ error: e.message });
+    else res.status(502).json({ error: String(e) });
+  }
+};
+
+/** The same lookup for the /deck and /practice pages (a Wasp query, so no demo key in the page). */
+export const getWordGloss: GetWordGloss<WordInput, WordGloss> = async (args) => {
+  try {
+    return await glossWord(args ?? {});
+  } catch (e) {
+    if (e instanceof WordError) throw new HttpError(e.status, e.message);
+    throw new HttpError(502, "Couldn't look that word up right now");
+  }
+};
+
+/** Explains one tapped word as it's used in its line; cached per video in data/{id}/words.json. */
+async function glossWord(input: WordInput): Promise<WordGloss> {
+  const { videoId, segmentId = -1, line, word, index = 0 } = input;
   if (!videoId || !line || !word || word.length > 60 || line.length > 500) {
-    res.status(400).json({ error: "videoId, line and word required" });
-    return;
+    throw new WordError(400, "videoId, line and word required");
   }
   const key = `${segmentId}|${index}|${word}|${line}`;
   const cached = readJson<Cache>(cacheFile(videoId), {})[key];
-  if (cached) {
-    res.json(cached);
-    return;
-  }
+  if (cached) return cached;
 
   const t0 = Date.now();
   const video = await getVideo(videoId);
@@ -102,9 +130,9 @@ export const extWord: ExtWord = async (req, res) => {
     cache[key] = gloss;
     writeJson(cacheFile(videoId), cache);
     console.log(`[word] ${videoId} "${word}" in ${Date.now() - t0}ms (voice: ${needVoice ? "tts" : "video"})`);
-    res.json(gloss);
+    return gloss;
   } catch (e) {
     console.error("[word] failed", e);
-    res.status(502).json({ error: String(e) });
+    throw e;
   }
-};
+}

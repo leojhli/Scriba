@@ -114,6 +114,12 @@ action submitShadow {
   entities: [ShadowAttempt, Video, User]
 }
 
+// Tap a word on /deck and /practice: same lookup and cache as /ext/word. A query rather than
+// an action, so a lookup doesn't make the deck refetch.
+query getWordGloss {
+  fn: import { getWordGloss } from "@src/server/word"
+}
+
 // The × on a deck card: deletes that line's pauses and practice attempts.
 action deleteCard {
   fn: import { deleteCard } from "@src/server/deck",
