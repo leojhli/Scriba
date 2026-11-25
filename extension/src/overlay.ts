@@ -154,7 +154,7 @@ function glyphsFor(lines: Line[]): string[] {
 const CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-.wrap { position: absolute; inset: 0; container-type: size; pointer-events: none;
+.wrap { position: absolute; inset: 0; container: player / size; pointer-events: none;
   --ink: #2b2420; --pencil: rgba(43,36,32,.28); --shiba: #ffa33c; --shiba-deep: #f08a1c; --ribbon: #d6533a; --muted: #6f6158;
   --hand: "Chalkboard SE", "Chalkboard", "Comic Neue", "Hiragino Maru Gothic ProN", "PingFang SC", system-ui, sans-serif;
   --round: "Arial Rounded MT Bold", "Hiragino Maru Gothic ProN", "PingFang SC", "Apple SD Gothic Neo", system-ui, sans-serif;
@@ -181,7 +181,7 @@ const CSS = `
 .roll.bottom { transform: rotate(-.5deg); }
 .ribbon { position: absolute; top: 12px; right: 34px; width: 13px; height: 36px; background: var(--ribbon); border: 1.75px solid var(--ink);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); z-index: 1; }
-.paper { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; overflow: hidden;
+.paper { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; overflow: hidden; container: paper / inline-size;
   background: linear-gradient(90deg, rgba(240,226,204,.55), rgba(255,251,243,.0) 9%, rgba(255,251,243,0) 91%, rgba(240,226,204,.55)), rgba(255,250,240,.8);
   backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); }
 .paper::before, .paper::after { content: ""; position: absolute; z-index: 2; pointer-events: none; }
@@ -278,8 +278,14 @@ canvas.fx { position: absolute; inset: 0; width: 100%; height: 100%; opacity: .5
 a.btn { text-decoration: none; }
 .ico { width: 1.1em; height: 1.1em; flex: none; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 
+/* Deck, Practice, Keep watching: one row, the same gap between each. The text is sized by the
+   window but the scroll by the player, so outside full screen the scroll can be narrow for its
+   text: tighten the buttons, then drop their icons, so the row stays inside the scroll. */
 .foot { display: flex; align-items: center; gap: .5em; padding: .55em 1.1em 1em; }
-.foot .grow { flex: 1; }
+.foot .btn { min-width: 0; }
+.foot .label { overflow: hidden; text-overflow: ellipsis; }
+@container paper (max-width: 24em) { .foot { gap: .4em; padding-inline: .8em; } .foot .btn { gap: .3em; padding-inline: .55em; } }
+@container paper (max-width: 19em) { .foot .ico { display: none; } }
 
 /* Shadowing result */
 .result:empty { display: none; }
@@ -333,8 +339,8 @@ a.btn { text-decoration: none; }
 .chip.ok { background: rgba(230,247,225,.95); } .chip.warn { background: rgba(255,231,199,.95); } .chip.offline { background: rgba(255,220,210,.95); }
 .spin { width: .85em; height: .85em; border-radius: 50%; border: 2px solid #f3d9b4; border-top-color: var(--shiba-deep); animation: spin .8s linear infinite; }
 
-@container (max-height: 600px) { .prev { display: none; } .head { padding-top: .9em; } .summary { -webkit-line-clamp: 3; } .orig { font-size: 1.22em; } }
-@container (max-width: 640px) {
+@container player (max-height: 600px) { .prev { display: none; } .head { padding-top: .9em; } .summary { -webkit-line-clamp: 3; } .orig { font-size: 1.22em; } }
+@container player (max-width: 640px) {
   .scroll { left: 3cqw; right: 3cqw; width: auto; top: auto; bottom: 12cqh; max-height: 74cqh; }
   .foot .label, .when { display: none; }
 }
@@ -570,7 +576,6 @@ export class Overlay {
       "foot",
       link("/deck", "deck", "Deck", "Your deck: every line you paused on"),
       link("/practice", "star", "Practice", "Practise your top lines"),
-      h("span", "grow"),
       resume,
     );
 
