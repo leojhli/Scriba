@@ -90,6 +90,16 @@ Shadowing used to check only *which words* you said (Scribe + word LCS). Now, af
 - **Verified on real audio** (the dialogue track of `iDulhoQ2pro`, English, with synthetic takes made from the actor's own line): same melody faster/higher or slower/lower 77–100, a flat reading 12–18, played backwards 10–40, a different line 22–43. ~60–250 ms per take once the track is decoded (decode ~1–2.5 s, once per video). The demo-cache Spanish clip is mostly whispered, so few frames are voiced there.
 - **Not verified:** a real microphone take (needs a human), and Mandarin tones.
 
+## Pronunciation scores with Azure (built 2026-11-24, branch `feat/pronunciation`, optional)
+
+Phase 2 of the pronunciation handoff: per-word and per-sound scores from **Azure Speech Pronunciation Assessment**, used only when `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` (or `AZURE_SPEECH_ENDPOINT`) are set in `.env.server`. Without them, shadowing behaves exactly as before.
+- **Server (`src/server/azure.ts`):** the take is converted to 16 kHz mono WAV with ffmpeg and sent to the REST short-audio endpoint (`…/speech/recognition/conversation/cognitiveservices/v1?language=…&format=detailed`) with a base64 `Pronunciation-Assessment` header: HundredMark, Phoneme granularity, Comprehensive, miscue on. No SDK dependency.
+- **`shadow.ts`:** if Azure is configured and the video's language maps to a supported locale (`azureLocale()`; `AZURE_SPEECH_LOCALE` covers videos with no detected language, or picks a variant like es-MX), Azure replaces Scribe for the take. Its recognised text goes through the same `score()`, so `accuracy`, `diff` and `paceRatio` keep their meaning; the scores are added as `pronunciation`. Any Azure failure logs and falls back to Scribe. Log: `[shadow] azure <locale> pron=… in …ms`.
+- **Pure parts (`src/shared/pronunciation.ts`, unit-tested):** locale mapping, reading Azure's JSON (the docs show the scores both flat on `NBest[0]` and nested under `PronunciationAssessment`; both are read), and `attachToDiff()`, which lines Azure's words up with our diff using the same normalisation (a Chinese word covers each of its characters; inserted words are skipped; left-out words score 0).
+- **UI:** each word in the shadowing result gets a coloured underline and its score (green ≥ 80, amber ≥ 60, red below, Azure's "mispronounced" line), plus "Pronunciation N · fluency N · complete N". Tapping a word opens its sounds on the tap-a-word card. Azure names sounds only for English (US) and Mandarin; elsewhere they're numbered ("sound 2 · 41").
+- **Not verified live:** no Azure key was available. Verified: unit tests with fixture JSON in both layouts, type checks, the no-key fallback (`/ext/shadow` answers exactly as before), and the UI drawn on a test page with sample scores. The REST layout (flat vs nested) should be checked on the first real response.
+- **Cost:** billed as speech-to-text; Azure's free F0 tier has 5 audio hours a month (≈ 6,000 three-second takes). Create the resource on F0 explicitly.
+
 ## Any language (decided 2026-11-22)
 
 The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.
@@ -206,7 +216,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 - YouTube only. Netflix goes on the roadmap slide (DRM blocks its audio and video).
 - Real input: the demo runs on a real YouTube video in Spanish. A judge can pick a different one. The first 3 minutes are processed, and two pre-processed videos are the fallback.
 - Language: any. Auto-detected per video by Scribe (originally Spanish only; see "Any language").
-- Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY`. The extension holds only `DEMO_KEY`, which maps every request to the demo user.
+- Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY` (plus the optional `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` for pronunciation scores). The extension holds only `DEMO_KEY`, which maps every request to the demo user.
 - Never a blank overlay: it shows "thinking…" immediately, and every call has an 8 s timeout with a cached fallback.
 - Mascot voice: Hope from the ElevenLabs voice library (published by its voice actor), never a clone of an actor from the video.
 
@@ -250,7 +260,9 @@ export type WordGloss = { word: string; lemma?: string; romanization?: string; m
 export type Explanation = { summary: string; audioUrl: string | null;
   lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
   offline?: boolean; partial?: boolean }
-export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number }
+export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number;
+  pronunciation?: { overall: number; fluency?: number; completeness?: number;   // Azure, only when configured
+    words: { word: string; score: number; i: number; phonemes?: { p: string; score: number }[] }[] } }  // i = index into diff
 ```
 
 **Extension → Wasp endpoints.** All are POST with JSON, carry the header `x-demo-key`, and are called only from the background worker:
