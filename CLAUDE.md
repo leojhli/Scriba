@@ -320,7 +320,7 @@ demo-cache/              pre-processed data for the 2 demo videos (Task 8)
 Produces `/ext/session`, `transcribe(path, lang): Promise<Segment[]>` and `isolate(path): Promise<string | null>`.
 
 - `/ext/session`: if the Video row exists, return it. Otherwise create it with `status: "processing"`, start ingest **without awaiting it**, and return immediately.
-- Ingest: run yt-dlp via `execFile` with `--download-sections "*0:00-3:00" -f "mp4[height<=360]"`, then run `transcribe` and `isolate` in parallel with `Promise.all`, then set `status: "ready"`.
+- Ingest: run yt-dlp via `execFile` with `--download-sections "*0:00-3:00" -f "ba/best[height<=360]" -S "lang,+abr"` (audio only, original language, smallest stream: ~4 s; see the comment in `ingest.ts`), then run `transcribe` and `isolate` in parallel with `Promise.all`, then set `status: "ready"`.
 - `transcribe`: Scribe with word timestamps. Group the words into segments, splitting at `.?!` or any gap over 0.8 s, with ids from 0. `isolate` writes `dialogue.mp3` and returns null on error.
 - Extension side: on page load and on YouTube's `yt-navigate-finish` event, call `/ext/session` and poll every 5 s until it's ready. Keep the segments in memory.
 - **Verify:** open the music-heavy demo video. Within ~60 s the background console logs ready with more than 5 segments whose times match the video. Reload the page and it's ready at once with no new ElevenLabs calls. With captions off, pausing still shows lines once it's ready (Review Focus 2).

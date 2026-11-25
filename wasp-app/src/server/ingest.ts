@@ -106,8 +106,16 @@ export async function ingest(videoId: string): Promise<void> {
       // The page title can be stale right after YouTube's in-app navigation, so take it from yt-dlp.
       "--print",
       "after_move:title",
+      // Audio only: everything downstream (Scribe, Voice Isolator) needs just the sound.
+      // - "mp4[height<=360]" used to get YouTube's combined 360p file (format 18), but YouTube no
+      //   longer serves it, and it matched a video-only stream (AV1): the audio step then failed.
+      // - "lang" first keeps the video's original language (many videos now carry AI dubs).
+      // - "+abr" takes the smallest audio: measured 2026-11-24, a 3-minute section of the 49 kbps
+      //   AAC stream downloads in ~4 s, every larger audio stream took ~90 s.
       "-f",
-      "mp4[height<=360]/best[height<=360]/bestaudio",
+      "ba/best[height<=360]",
+      "-S",
+      "lang,+abr",
       "-o",
       path.join(dir, "source.%(ext)s"),
       `https://www.youtube.com/watch?v=${videoId}`,
