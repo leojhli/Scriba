@@ -35,12 +35,15 @@ export type ShadowResult = {
   accuracy: number;
   paceRatio: number;
   /**
-   * Per-word and per-sound scores from Azure Pronunciation Assessment, when the server has Azure
-   * keys and the language is supported (otherwise absent: scoring is Scribe + the word diff).
+   * How well the words were said, 0–100. `source`: "azure" = Azure Pronunciation Assessment
+   * (per word and per sound; only with Azure keys), "scribe" = how sure Scribe was of each word
+   * (clarity). `tip`: one coaching tip from Claude, from the transcript (it never hears the audio).
    * `accuracy` and `diff` keep their meaning either way.
    */
   pronunciation?: {
     overall: number; // 0–100
+    source?: "azure" | "scribe";
+    tip?: string;
     fluency?: number;
     completeness?: number;
     /** `i`: index into `diff`. `phonemes[].p` is empty where Azure scores sounds without naming them. */

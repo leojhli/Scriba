@@ -119,6 +119,7 @@ export function attachToDiff(diff: ShadowResult["diff"], a: Assessment): Pronunc
   });
   return {
     overall: Math.round(a.overall),
+    source: "azure",
     ...(a.fluency !== undefined ? { fluency: Math.round(a.fluency) } : {}),
     ...(a.completeness !== undefined ? { completeness: Math.round(a.completeness) } : {}),
     words,
