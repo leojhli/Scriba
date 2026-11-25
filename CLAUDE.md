@@ -79,6 +79,17 @@ A pause now speaks once the summary is done, without waiting for the translation
 - **Compare your take:** after "Hold to shadow", Original / You / Back to back buttons play the line and your recording (kept as a blob in the content script) even if scoring fails.
 - **Not verified live:** `/ext/word` and the highlight timing against real Scribe word timings need API keys. Verified: unit tests (`words.test.ts`, segments), type checks, and the overlay drawn on a test page (word card, compare row, highlights, real clicks on words).
 
+## Intonation (built 2026-11-24, branch `feat/pronunciation`)
+
+Shadowing used to check only *which words* you said (Scribe + word LCS). Now, after a take, the scroll also compares your **pitch curve** with the actor's, which is what carries intonation (and Mandarin tones).
+- **Pipeline (`extension/src/pitch.ts`, pure, unit-tested):** YIN pitch per 10 ms (60–500 Hz) → `cleanContour()` (octave-jump fix, 5-frame median, bridges gaps ≤ 5 frames) → semitones relative to each speaker's own median (a deep and a high voice give the same curve) → DTW on voiced frames (Sakoe–Chiba band 20 %), so speed isn't an error (pace stays in `paceRatio`) → `intonationScore()` 0–100 + `intonationHint()`.
+- **Score:** mean error per actor frame, against how much the actor's own melody moves (`SCORE` in `pitch.ts`): a flat reading ≈ 0, a match 100, 0.25 st allowed for noise. Null (no chart) when either side has < 15 voiced frames.
+- **Browser side (`extension/src/intonation.ts`):** the take (webm blob) and the actor's line (`dialogue.mp3` via `mediaUrl()`, decoded once per video and kept as 16 kHz mono, line ± 0.15 s) are decoded with one `AudioContext` made on the "Hold to shadow" press. Runs in parallel with `/ext/shadow`; the word diff never waits for it.
+- **UI:** under the Compare row, an inline-SVG chart (theirs solid, yours dashed and mapped onto their timeline through the DTW path, gaps where unvoiced), "Intonation N" and one hint ("Your pitch stays flat where theirs rises (at the end)"). A playhead follows Original / Back to back. Skipped silently without a dialogue track, for captions-only lines (`segmentId -1`), or on too little voiced audio.
+- **Tuned on real audio (differs from the handoff's starting values):** YIN threshold 0.35 (0.15 found pitch in only ~30–40 % of a normal line's frames on the isolated, mp3-compressed track), pitch floor 60 Hz (deep voices dip under 70), and the relative score above (a fixed "6 semitones = 0" let a flat reading of a calm line score 85).
+- **Verified on real audio** (the dialogue track of `iDulhoQ2pro`, English, with synthetic takes made from the actor's own line): same melody faster/higher or slower/lower 77–100, a flat reading 12–18, played backwards 10–40, a different line 22–43. ~60–250 ms per take once the track is decoded (decode ~1–2.5 s, once per video). The demo-cache Spanish clip is mostly whispered, so few frames are voiced there.
+- **Not verified:** a real microphone take (needs a human), and Mandarin tones.
+
 ## Any language (decided 2026-11-22)
 
 The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.
