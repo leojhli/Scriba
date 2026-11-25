@@ -79,6 +79,36 @@ A pause now speaks once the summary is done, without waiting for the translation
 - **Compare your take:** after "Hold to shadow", Original / You / Back to back buttons play the line and your recording (kept as a blob in the content script) even if scoring fails.
 - **Not verified live:** `/ext/word` and the highlight timing against real Scribe word timings need API keys. Verified: unit tests (`words.test.ts`, segments), type checks, and the overlay drawn on a test page (word card, compare row, highlights, real clicks on words).
 
+## Intonation (built 2026-11-24, branch `feat/pronunciation`)
+
+Shadowing used to check only *which words* you said (Scribe + word LCS). Now, after a take, the scroll also compares your **pitch curve** with the actor's, which is what carries intonation (and Mandarin tones).
+- **Pipeline (`extension/src/pitch.ts`, pure, unit-tested):** YIN pitch per 10 ms (60–500 Hz) → `cleanContour()` (octave-jump fix, 5-frame median, bridges gaps ≤ 5 frames) → semitones relative to each speaker's own median (a deep and a high voice give the same curve) → DTW on voiced frames (Sakoe–Chiba band 20 %), so speed isn't an error (pace stays in `paceRatio`) → `intonationScore()` 0–100 + `intonationHint()`.
+- **Score:** mean error per actor frame, against how much the actor's own melody moves (`SCORE` in `pitch.ts`): a flat reading ≈ 0, a match 100, 0.25 st allowed for noise. Null (no chart) when either side has < 15 voiced frames.
+- **Browser side (`extension/src/intonation.ts`):** the take (webm blob) and the actor's line (`dialogue.mp3` via `mediaUrl()`, decoded once per video and kept as 16 kHz mono, line ± 0.15 s) are decoded with one `AudioContext` made on the "Hold to shadow" press. Runs in parallel with `/ext/shadow`; the word diff never waits for it.
+- **UI:** under the Compare row, an inline-SVG chart (theirs solid, yours dashed and mapped onto their timeline through the DTW path, gaps where unvoiced), "Intonation N" and one hint ("Your pitch stays flat where theirs rises (at the end)"). A playhead follows Original / Back to back. Skipped silently without a dialogue track, for captions-only lines (`segmentId -1`), or on too little voiced audio.
+- **Tuned on real audio (differs from the handoff's starting values):** YIN threshold 0.35 (0.15 found pitch in only ~30–40 % of a normal line's frames on the isolated, mp3-compressed track), pitch floor 60 Hz (deep voices dip under 70), and the relative score above (a fixed "6 semitones = 0" let a flat reading of a calm line score 85).
+- **Verified on real audio** (the dialogue track of `iDulhoQ2pro`, English, with synthetic takes made from the actor's own line): same melody faster/higher or slower/lower 77–100, a flat reading 12–18, played backwards 10–40, a different line 22–43. ~60–250 ms per take once the track is decoded (decode ~1–2.5 s, once per video). The demo-cache Spanish clip is mostly whispered, so few frames are voiced there.
+- **Not verified:** a real microphone take (needs a human), and Mandarin tones.
+
+## Clarity + coaching tip, no Azure needed (built 2026-11-24, branch `feat/pronunciation`)
+
+The default pronunciation feedback, from the keys we already have (ElevenLabs + Anthropic). Azure (next section) replaces the clarity scores when it's configured; the tip works with both.
+- **Clarity (Scribe):** Scribe returns a `logprob` per word; `transcribeWords()` now keeps it, and `clarityFromScribe()` (`src/shared/clarity.ts`, unit-tested) turns it into 0–100 per word of the line (`exp(logprob)`), lined up with the word diff, with missed/wrong words counting 0 in the overall. It measures whether a listener would catch the word, not per-sound accuracy. Below 70 counts as unclear.
+- **Tip (Claude, `src/server/coach.ts`):** when something was missed, wrong, added or unclear (`needsTip()`; never for silence), Claude gets the line, what was heard and each word's status/clarity (`tipInput()`) and writes one or two sentences on the most likely sound to fix. Claude can't hear audio: it reasons from how the words came out ("«perro» came out as «pero» … the rolled rr"). Same model/settings as explain, 6 s timeout; no tip on timeout or error. The ShadowAttempt is saved before the tip is requested.
+- **UI:** each word's score as a coloured underline, "Clarity N" (or "Pronunciation N · fluency · complete" with Azure), and the tip in a "Tip" box.
+- **Verified live** (learner-like takes made with ElevenLabs TTS, converted to webm/opus, through the real `/ext/shadow`): clean takes → clarity 100, no tip, ~0.3 s; "perro" said as "pero" → accuracy 83 and the rolled-rr tip; wrong words → a tip naming them; with a tip, ~2.7–3.7 s per take. Clarity stays ~100 for anything intelligible (a TTS "Spanish accent", a mild lowpass) and drops only when a word really blurs (heavy noise: "they" 62; rushed + muffled: "been" 56), and the tip then targets that word.
+- **Not verified:** a real microphone take (needs a human).
+
+## Pronunciation scores with Azure (built 2026-11-24, branch `feat/pronunciation`, optional)
+
+Phase 2 of the pronunciation handoff: per-word and per-sound scores from **Azure Speech Pronunciation Assessment**, used only when `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` (or `AZURE_SPEECH_ENDPOINT`) are set in `.env.server`. Without them, shadowing behaves exactly as before.
+- **Server (`src/server/azure.ts`):** the take is converted to 16 kHz mono WAV with ffmpeg and sent to the REST short-audio endpoint (`…/speech/recognition/conversation/cognitiveservices/v1?language=…&format=detailed`) with a base64 `Pronunciation-Assessment` header: HundredMark, Phoneme granularity, Comprehensive, miscue on. No SDK dependency.
+- **`shadow.ts`:** if Azure is configured and the video's language maps to a supported locale (`azureLocale()`; `AZURE_SPEECH_LOCALE` covers videos with no detected language, or picks a variant like es-MX), Azure replaces Scribe for the take. Its recognised text goes through the same `score()`, so `accuracy`, `diff` and `paceRatio` keep their meaning; the scores are added as `pronunciation`. Any Azure failure logs and falls back to Scribe. Log: `[shadow] azure <locale> pron=… in …ms`.
+- **Pure parts (`src/shared/pronunciation.ts`, unit-tested):** locale mapping, reading Azure's JSON (the docs show the scores both flat on `NBest[0]` and nested under `PronunciationAssessment`; both are read), and `attachToDiff()`, which lines Azure's words up with our diff using the same normalisation (a Chinese word covers each of its characters; inserted words are skipped; left-out words score 0).
+- **UI:** each word in the shadowing result gets a coloured underline and its score (green ≥ 80, amber ≥ 60, red below, Azure's "mispronounced" line), plus "Pronunciation N · fluency N · complete N". Tapping a word opens its sounds on the tap-a-word card. Azure names sounds only for English (US) and Mandarin; elsewhere they're numbered ("sound 2 · 41").
+- **Not verified live:** no Azure key was available. Verified: unit tests with fixture JSON in both layouts, type checks, the no-key fallback (`/ext/shadow` answers exactly as before), and the UI drawn on a test page with sample scores. The REST layout (flat vs nested) should be checked on the first real response.
+- **Cost:** billed as speech-to-text; Azure's free F0 tier has 5 audio hours a month (≈ 6,000 three-second takes). Create the resource on F0 explicitly.
+
 ## Any language (decided 2026-11-22)
 
 The user demos Mandarin as well as Spanish, so there is **no fixed `LANGUAGE`** any more.
@@ -196,7 +226,7 @@ Spec: idea 3 in the ElevenLabs hackathon ideation doc (Tab 3), the "study progra
 - YouTube only. Netflix goes on the roadmap slide (DRM blocks its audio and video).
 - Real input: the demo runs on a real YouTube video in Spanish. A judge can pick a different one. The first 3 minutes are processed, and two pre-processed videos are the fallback.
 - Language: any. Auto-detected per video by Scribe (originally Spanish only; see "Any language").
-- Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY`. The extension holds only `DEMO_KEY`, which maps every request to the demo user.
+- Keys live **only** in the Wasp server's `.env.server`: `ELEVENLABS_API_KEY`, `ANTHROPIC_API_KEY` and `DEMO_KEY` (plus the optional `AZURE_SPEECH_KEY` / `AZURE_SPEECH_REGION` for pronunciation scores). The extension holds only `DEMO_KEY`, which maps every request to the demo user.
 - Never a blank overlay: it shows "thinking…" immediately, and every call has an 8 s timeout with a cached fallback.
 - Mascot voice: Hope from the ElevenLabs voice library (published by its voice actor), never a clone of an actor from the video.
 
@@ -240,7 +270,10 @@ export type WordGloss = { word: string; lemma?: string; romanization?: string; m
 export type Explanation = { summary: string; audioUrl: string | null;
   lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
   offline?: boolean; partial?: boolean }
-export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number }
+export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number;
+  pronunciation?: { overall: number; source?: "azure" | "scribe"; tip?: string;   // scribe = clarity; tip from Claude
+    fluency?: number; completeness?: number;   // Azure only
+    words: { word: string; score: number; i: number; phonemes?: { p: string; score: number }[] }[] } }  // i = index into diff
 ```
 
 **Extension → Wasp endpoints.** All are POST with JSON, carry the header `x-demo-key`, and are called only from the background worker:

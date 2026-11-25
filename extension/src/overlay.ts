@@ -8,6 +8,7 @@
 import { WEB_URL } from "./shared/config";
 import type { Explanation, ShadowResult, WordGloss } from "./shared/types";
 import { CLIP_RATES, nextVoiceRate, rateLabel, shortRateLabel } from "./voiceRate";
+import type { IntonationView } from "./intonation";
 import { splitWords } from "./words";
 import { HEAR_IT_RATE } from "./shared/config";
 import type { Fx } from "./fx";
@@ -105,6 +106,34 @@ function sketchDefs(): SVGSVGElement {
     svg.append(f);
   }
   return svg;
+}
+
+/** Pronunciation score colour: green, amber, red (Azure calls a word below 60 mispronounced). */
+const prColor = (score: number) => (score >= 80 ? "#3fb55e" : score >= 60 ? "#d99a00" : "#d6533a");
+
+/**
+ * Under the word diff: "Clarity 82" (how sure Scribe was of your words) or, with Azure,
+ * "Pronunciation 80 · fluency 90 · complete 75". Nothing when no word was scored.
+ */
+function pronLine(p: NonNullable<ShadowResult["pronunciation"]>): HTMLDivElement | null {
+  if (!p.words.length) return null;
+  const azure = p.source === "azure";
+  const el = h(
+    "div",
+    "pron",
+    azure ? "Pronunciation " : "Clarity ",
+    h("b", "", String(p.overall)),
+    p.fluency !== undefined && ` · fluency ${p.fluency}`,
+    p.completeness !== undefined && ` · complete ${p.completeness}`,
+  );
+  el.title = azure ? "Azure pronunciation assessment" : "How clearly each word came through: how sure the transcription was of it";
+  el.style.setProperty("--prc", prColor(p.overall));
+  return el;
+}
+
+/** Claude's coaching tip, with «quotes» shown as curly quotes like Scriba's note. */
+function tipLine(tip: string): HTMLDivElement {
+  return h("div", "coach", h("span", "lbl", "Tip"), tip.replace(/«\s*/g, "“").replace(/\s*»/g, "”"));
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -299,10 +328,44 @@ a.btn { text-decoration: none; }
 .w.missed { background: rgba(255,170,155,.5); color: #a3321f; text-decoration: line-through; }
 .w.wrong { background: rgba(255,214,102,.5); color: #7a5a00; }
 .w.extra { color: var(--muted); font-style: italic; }
+/* Pronunciation (Azure): a pencil underline by how well each word was said, tap for its sounds */
+.w[data-pr] { position: relative; border-bottom: 2.5px solid var(--prc); border-radius: 6px 6px 2px 2px; }
+.w[data-pr] sup { font-size: .62em; font-weight: 700; color: var(--prc); margin-left: .15em; }
+.w.tapme { cursor: pointer; }
+.w.tapme:hover, .w.tapme:focus-visible { outline: 1.5px dashed var(--prc); outline-offset: 1px; }
+.pron { font-family: var(--hand); font-size: .82em; color: var(--muted); }
+.pron b { color: var(--prc, var(--ink)); }
+.coach { font-family: var(--hand); font-size: .86em; line-height: 1.4; color: #4a3f37; margin-top: .25em; padding: .3em .55em;
+  background: rgba(255,163,60,.14); border-left: 2.5px solid var(--shiba-deep); border-radius: 3px 8px 8px 3px; }
+.coach .lbl { font-weight: 700; color: var(--shiba-deep); margin-right: .4em; }
+.sounds { display: flex; flex-wrap: wrap; gap: .3em; margin-top: .2em; }
+.sound { display: inline-flex; gap: .3em; align-items: baseline; padding: .05em .45em; border-radius: 8px; font-size: .86em;
+  background: color-mix(in srgb, var(--prc) 22%, transparent); }
+.sound b { font-family: var(--round); font-weight: 600; }
+.sound i { font-style: normal; font-size: .85em; color: var(--muted); }
 .pace, .status { color: var(--muted); font-size: .82em; }
 .compare:empty { display: none; }
 .compare { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; padding-top: .3em; }
 .compare .lbl { font-family: var(--hand); font-size: .8em; color: var(--muted); margin-right: .1em; }
+
+/* Intonation: the actor's pitch curve (solid) and yours (dashed), lined up in time */
+.into:empty { display: none; }
+.into { display: flex; gap: .7em; align-items: center; padding-top: .45em; animation: rise .3s ease-out both; }
+.into svg.pitch { flex: none; width: 15.5em; max-width: 62%; height: auto; overflow: visible; }
+.pitch .frame { fill: rgba(255,252,246,.6); stroke: var(--ink); stroke-width: 1.4; filter: url(#sk1); }
+.pitch .mid { stroke: var(--pencil); stroke-width: 1; stroke-dasharray: 2 4; }
+.pitch .them { fill: none; stroke: var(--ink); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.pitch .you { fill: none; stroke: var(--shiba-deep); stroke-width: 2.2; stroke-dasharray: 5 4; stroke-linecap: round; stroke-linejoin: round; }
+.pitch .playhead { stroke: var(--ribbon); stroke-width: 1.6; opacity: 0; transition: opacity .15s; }
+.pitch .playhead.on { opacity: 1; }
+.into .side { display: flex; flex-direction: column; gap: .15em; min-width: 0; }
+.into .score { font-family: var(--hand); font-weight: 700; font-size: .9em; }
+.into .score b { font-size: 1.25em; color: var(--c, var(--ink)); }
+.into .legend { font-size: .72em; color: var(--muted); display: flex; gap: .7em; }
+.into .legend i { display: inline-block; width: 1.3em; height: 0; vertical-align: middle; margin-right: .3em; border-top: 2px solid var(--ink); }
+.into .legend i.you { border-top: 2px dashed var(--shiba-deep); }
+.into .tip { font-family: var(--hand); font-size: .82em; color: #4a3f37; }
+.into .skel { flex: 1; }
 
 /* Words: highlighted as they're heard; the line's words can be tapped */
 .tok { border-radius: 4px; transition: background .12s; }
@@ -380,6 +443,9 @@ export class Overlay {
   private offlineTag: HTMLSpanElement | null = null;
   private results: HTMLDivElement[] = [];
   private compares: HTMLDivElement[] = [];
+  private intos: HTMLDivElement[] = [];
+  /** Per line: the drawn chart's playhead and how to place dialogue-track time on it. */
+  private heads: ({ line: SVGLineElement; x(t: number): number | null } | null)[] = [];
   private compareBtns = new Map<Compare, HTMLButtonElement>();
   /** Token spans of Scriba's note and of the "Just said" line, for highlighting and tapping. */
   private summaryToks: HTMLElement[] = [];
@@ -649,6 +715,8 @@ export class Overlay {
     this.results[i] = result;
     const compare = h("div", "compare");
     this.compares[i] = compare;
+    const into = h("div", "into");
+    this.intos[i] = into;
     // The line, one tappable span per word (any language: Chinese and Japanese are split into words too).
     const orig = h("div", "orig");
     this.lineToks = splitWords(line.original).map((t, k) => {
@@ -681,6 +749,7 @@ export class Overlay {
       actions.childElementCount > 0 && actions,
       result,
       compare,
+      into,
       slots.notes,
     );
     this.slots = slots;
@@ -726,6 +795,8 @@ export class Overlay {
   private resetLine(): void {
     this.results = [];
     this.compares = [];
+    this.intos = [];
+    this.heads = [];
     this.compareBtns.clear();
     this.shadowBtns = [];
     this.hearBtns = [];
@@ -804,9 +875,12 @@ export class Overlay {
   // ---------- Compare your take with the original ----------
 
   /** After a shadowing take: buttons to play the original, your take, or both back to back. */
-  takeReady(i: number, line: Line, hasOriginal: boolean): void {
+  takeReady(i: number, line: Line, hasOriginal: boolean, pitchPending = false): void {
     const row = this.compares[i];
     if (!row) return;
+    // The intonation chart is worked out in the background; sketch where it'll go.
+    this.heads[i] = null;
+    this.intos[i]?.replaceChildren(...(pitchPending ? [h("div", "skel", h("div", "sk w80"), h("div", "sk w40"))] : []));
     this.compareBtns.clear();
     const btn = (which: Compare, ico: keyof typeof ICONS, label: string, tip: string) => {
       const b = h("button", "btn", icon(ico), label);
@@ -823,6 +897,105 @@ export class Overlay {
         hasOriginal && btn("both", "swap", "Back to back", "The original, then your take"),
       ].filter((n): n is HTMLElement => !!n),
     );
+  }
+
+  /**
+   * The intonation chart for a take: the actor's pitch curve (solid) and yours (dashed), yours
+   * mapped onto their timeline through the DTW path so the shapes line up. Null removes the
+   * placeholder (no dialogue track, too little voiced audio…).
+   */
+  intonation(i: number, v: IntonationView | null): void {
+    const slot = this.intos[i];
+    if (!slot) return;
+    if (!v) {
+      slot.replaceChildren();
+      return;
+    }
+    const W = 220;
+    const H = 70;
+    const P = 6;
+    // x: the actor's voiced stretch; y: both curves, clamped to ±12 semitones.
+    const voiced = v.actor.flatMap((s, k) => (s === null ? [] : [k]));
+    const k0 = voiced[0];
+    const k1 = voiced[voiced.length - 1];
+    // Yours on their timeline: the average of your frames matched to each of theirs.
+    const sums = new Map<number, { s: number; n: number }>();
+    for (const [a, b] of v.path) {
+      const yv = v.learner[b];
+      if (yv === null) continue;
+      const e = sums.get(a) ?? { s: 0, n: 0 };
+      e.s += yv;
+      e.n++;
+      sums.set(a, e);
+    }
+    const yours: (number | null)[] = v.actor.map((_, k) => {
+      const e = sums.get(k);
+      return e ? e.s / e.n : null;
+    });
+    const all = [...voiced.map((k) => v.actor[k]!), ...yours.filter((yv): yv is number => yv !== null)];
+    const lo = Math.max(-12, Math.min(...all) - 1);
+    const hi = Math.min(12, Math.max(...all) + 1);
+    const x = (k: number) => P + ((k - k0) / Math.max(1, k1 - k0)) * (W - 2 * P);
+    const y = (s: number) => H - P - ((Math.min(hi, Math.max(lo, s)) - lo) / Math.max(1, hi - lo)) * (H - 2 * P);
+    // Gaps (unvoiced frames) break the line instead of being bridged.
+    const line = (vals: (number | null)[]) => {
+      let d = "";
+      let open = false;
+      for (let k = k0; k <= k1; k++) {
+        const s = vals[k];
+        if (s === null || s === undefined) {
+          open = false;
+          continue;
+        }
+        d += `${open ? "L" : "M"}${x(k).toFixed(1)} ${y(s).toFixed(1)}`;
+        open = true;
+      }
+      return d;
+    };
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("class", "pitch");
+    svg.setAttribute("role", "img");
+    svg.setAttribute("aria-label", `Pitch curves: theirs solid, yours dashed. Intonation ${Math.round(v.score)} of 100.`);
+    const el = (tag: string, attrs: Record<string, string>) => {
+      const e = document.createElementNS(SVG_NS, tag);
+      for (const [k, val] of Object.entries(attrs)) e.setAttribute(k, val);
+      svg.append(e);
+      return e;
+    };
+    el("rect", { class: "frame", x: "1", y: "1", width: String(W - 2), height: String(H - 2), rx: "9" });
+    if (lo < 0 && hi > 0) el("line", { class: "mid", x1: String(P), x2: String(W - P), y1: y(0).toFixed(1), y2: y(0).toFixed(1) });
+    el("path", { class: "them", d: line(v.actor) });
+    el("path", { class: "you", d: line(yours) });
+    const head = el("line", { class: "playhead", x1: "0", x2: "0", y1: "3", y2: String(H - 3) }) as SVGLineElement;
+    this.heads[i] = {
+      line: head,
+      x: (t) => {
+        const k = (t - v.actorStart) / v.hopSec;
+        return k < k0 || k > k1 ? null : x(k);
+      },
+    };
+
+    const score = Math.round(v.score);
+    const scoreEl = h("div", "score", "Intonation ", h("b", "", String(score)));
+    scoreEl.style.setProperty("--c", score >= 80 ? "#3fb55e" : score >= 55 ? "#d99a00" : "#d6533a");
+    slot.replaceChildren(
+      svg,
+      h("div", "side", scoreEl, h("div", "legend", h("span", "", h("i"), "them"), h("span", "", h("i", "you"), "you")), h("div", "tip", v.hint)),
+    );
+  }
+
+  /** Moves line i's chart playhead to dialogue-track time t; null (or i = -1) hides playheads. */
+  intonationAt(i: number, t: number | null): void {
+    this.heads.forEach((hd, k) => {
+      if (!hd) return;
+      const px = t === null || (i >= 0 && k !== i) ? null : hd.x(t);
+      hd.line.classList.toggle("on", px !== null);
+      if (px !== null) {
+        hd.line.setAttribute("x1", px.toFixed(1));
+        hd.line.setAttribute("x2", px.toFixed(1));
+      }
+    });
   }
 
   /** Marks which compare button is playing; null when nothing is. */
@@ -941,19 +1114,69 @@ export class Overlay {
     ring.style.setProperty("--p", String(pct));
     ring.style.setProperty("--c", color);
     const pace = r.paceRatio > 1.25 ? "a little slow" : r.paceRatio < 0.8 ? "a little fast" : "great pace";
+    const p = r.pronunciation;
+    const byDiff = new Map((p?.words ?? []).map((w) => [w.i, w]));
     el.replaceChildren(
       ring,
       h(
         "div",
         "",
-        h("div", "words", ...r.diff.map((d) => {
+        h("div", "words", ...r.diff.map((d, k) => {
           const w = h("span", `w ${d.status}`, d.word);
           w.title = d.status;
+          const pr = byDiff.get(k);
+          if (pr) {
+            // How well it was said (Azure): underline colour + score; tap for its sounds.
+            w.dataset.pr = String(pr.score);
+            w.style.setProperty("--prc", prColor(pr.score));
+            w.append(h("sup", "", String(pr.score)));
+            w.title = `${d.status} · ${p?.source === "azure" ? "pronunciation" : "clarity"} ${pr.score}`;
+            if (pr.phonemes?.length) {
+              w.classList.add("tapme");
+              w.tabIndex = 0;
+              w.setAttribute("role", "button");
+              w.title += " · tap for its sounds";
+              const show = () => this.sounds(pr.word, pr.score, pr.phonemes!);
+              w.addEventListener("click", show);
+              w.addEventListener("keydown", (ev) => ev.key === "Enter" && show());
+            }
+          }
           return w;
         })),
+        p && pronLine(p),
+        p?.tip && tipLine(p.tip),
         h("div", "pace", `Pace ${r.paceRatio.toFixed(2)}× · ${pace}`),
       ),
     );
+  }
+
+  /**
+   * A tapped word's sounds (Azure phoneme scores), on the same card as tap-a-word. Azure names the
+   * sounds only for English (US) and Mandarin; elsewhere they're numbered.
+   */
+  private sounds(word: string, score: number, phonemes: { p: string; score: number }[]): void {
+    const slot = this.glossSlot;
+    if (!slot) return;
+    this.lineToks[this.glossSel]?.classList.remove("sel");
+    this.glossSel = -1;
+    const weak = phonemes.filter((ph) => ph.score < 60);
+    const named = phonemes.some((ph) => ph.p);
+    const chip = (ph: { p: string; score: number }, n: number) => {
+      const c = h("span", "sound", h("b", "", ph.p || `sound ${n + 1}`), h("i", "", String(Math.round(ph.score))));
+      c.style.setProperty("--prc", prColor(ph.score));
+      return c;
+    };
+    const tip = !weak.length
+      ? "Every sound was clear."
+      : named
+        ? `Work on ${weak.map((ph) => `“${ph.p}”`).join(", ")}.`
+        : `${weak.length} of ${phonemes.length} sounds were unclear: try “Hear it clearly” at .5× and copy it.`;
+    const head = h("div", "", h("span", "gw", word), h("span", "gl", `pronunciation ${score}`));
+    const x = h("button", "x", "×");
+    x.title = "Close";
+    x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", () => slot.replaceChildren());
+    slot.replaceChildren(h("div", "gloss", h("div", "gbody", head, h("div", "sounds", ...phonemes.map(chip)), h("div", "gn", tip)), x));
   }
 
   hideBubble(): void {

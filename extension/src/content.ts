@@ -1,5 +1,6 @@
 // Content script on youtube.com: wires session, captions, signals and the overlay together.
 import { CaptionBuffer } from "./captions";
+import { analyseIntonation, audioContext, dialogueAudio } from "./intonation";
 import { loadEnabled, onEnabledChange } from "./enabled";
 import { api, mediaUrl } from "./messages";
 import { Overlay, type Compare, type Line } from "./overlay";
@@ -269,6 +270,7 @@ function stopAudio(): void {
   overlay.comparing(null);
   overlay.highlightSummary(-1);
   overlay.highlightLine(-1);
+  overlay.intonationAt(-1, null);
   if (clip) {
     clip.pause();
     clip = null;
@@ -370,13 +372,17 @@ async function playLine(line: Line, i: number, onStart?: () => void): Promise<bo
       overlay.hearing(i, true);
       onStart?.();
     },
-    onTick: (t) => overlay.highlightLine(tokenAt(spans, t)),
+    onTick: (t) => {
+      overlay.highlightLine(tokenAt(spans, t));
+      overlay.intonationAt(i, t); // the playhead on the pitch chart, if there is one
+    },
   });
   if (!clip) {
     // Not replaced by another clip: tidy up (stopAudio already did if it was stopped).
     if (clipIndex === i) clipIndex = -1;
     overlay.hearing(i, false);
     overlay.highlightLine(-1);
+    overlay.intonationAt(i, null);
   }
   return full;
 }
@@ -469,8 +475,14 @@ async function onCompare(line: Line, i: number, which: Compare): Promise<void> {
 
 // ---------- Shadowing (Task 6b) ----------
 
-function onShadowStart(_line: Line, i: number): void {
+function onShadowStart(line: Line, i: number): void {
   stopAudio();
+  // Intonation: make the AudioContext inside this press (so it isn't suspended), and start
+  // decoding the actor's voice track while you speak.
+  if (videoId && session?.hasDialogue && segment(line.segmentId)) {
+    audioContext();
+    void dialogueAudio(videoId);
+  }
   shadowStart = recorder
     .start()
     .then(() => {
@@ -495,7 +507,11 @@ async function onShadowStop(line: Line, i: number): Promise<void> {
   if (blob && durationSec > 0.3) {
     if (take) URL.revokeObjectURL(take);
     take = URL.createObjectURL(blob);
-    overlay.takeReady(i, line, !!(session?.hasDialogue && seg));
+    // Intonation needs the actor's voice-only line with real timing (not captions-only lines).
+    const pitch = !!(session?.hasDialogue && seg && line.segmentId >= 0);
+    overlay.takeReady(i, line, !!(session?.hasDialogue && seg), pitch);
+    // In parallel with the word scoring below; whichever finishes first shows first.
+    if (pitch && seg) void showIntonation(i, seg, blob);
   }
   const res = await api<ShadowResult>("/ext/shadow", {
     videoId,
@@ -507,6 +523,24 @@ async function onShadowStop(line: Line, i: number): Promise<void> {
   });
   overlay.shadowState(i, "idle");
   overlay.shadowResult(i, res.ok ? res.data : { error: "Couldn't score that one. Try again?" });
+}
+
+let takeSeq = 0;
+
+/** Pitch curves + intonation score for a take. Skipped silently (placeholder removed) if it can't be scored. */
+async function showIntonation(i: number, seg: Segment, blob: Blob): Promise<void> {
+  const mine = ++takeSeq;
+  const seq = explainSeq;
+  const id = videoId;
+  if (!id) return;
+  const t0 = performance.now();
+  const r = await analyseIntonation(id, seg, blob).catch((err) => {
+    log("intonation failed", err);
+    return null;
+  });
+  if (mine !== takeSeq || seq !== explainSeq || id !== videoId) return; // a newer take, pause or video
+  log(r ? `intonation ${Math.round(r.score)} (${r.meanErrorSemitones.toFixed(1)} st off) in ${Math.round(performance.now() - t0)}ms` : "intonation: not enough voiced audio");
+  overlay.intonation(i, r);
 }
 
 // ---------- Boot ----------

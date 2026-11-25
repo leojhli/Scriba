@@ -34,7 +34,8 @@ export async function transcribeWords(
   if (!("words" in res)) throw new Error("unexpected Scribe response (multichannel/webhook)");
   const words = res.words
     .filter((w) => w.type === "word" && w.start != null && w.end != null)
-    .map((w) => ({ text: w.text, start: w.start!, end: w.end! }));
+    // logprob: how sure Scribe was of each word (≤ 0). Shadowing turns it into a clarity score.
+    .map((w) => ({ text: w.text, start: w.start!, end: w.end!, ...(Number.isFinite(w.logprob) ? { logprob: w.logprob } : {}) }));
   return { text: res.text, language: res.languageCode || null, words };
 }
 

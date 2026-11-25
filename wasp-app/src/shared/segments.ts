@@ -1,7 +1,8 @@
 import { joinWords, SENTENCE_END } from "./text";
 import type { Segment } from "./types";
 
-export type Word = { text: string; start: number; end: number };
+/** A transcribed word. `logprob` (≤ 0, from Scribe) is how sure it was; not kept in Segment.words. */
+export type Word = { text: string; start: number; end: number; logprob?: number };
 
 const SOFT_BREAK = /[,，、;；:：]$/u;
 const SOFT_BREAK_AFTER_S = 6;

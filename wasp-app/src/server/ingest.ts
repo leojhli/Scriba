@@ -13,7 +13,7 @@ import { getVideo } from "./videos";
 const run = promisify(execFile);
 
 /** A full path to ffmpeg when we know one, else the bare name "ffmpeg", which is looked up on PATH. */
-function ffmpegPath(): string {
+export function ffmpegPath(): string {
   if (process.env.FFMPEG_PATH) return process.env.FFMPEG_PATH;
   const local = path.join(os.homedir(), ".local/bin/ffmpeg");
   return fs.existsSync(local) ? local : "ffmpeg";

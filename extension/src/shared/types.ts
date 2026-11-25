@@ -34,6 +34,21 @@ export type ShadowResult = {
   diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[];
   accuracy: number;
   paceRatio: number;
+  /**
+   * How well the words were said, 0–100. `source`: "azure" = Azure Pronunciation Assessment
+   * (per word and per sound; only with Azure keys), "scribe" = how sure Scribe was of each word
+   * (clarity). `tip`: one coaching tip from Claude, from the transcript (it never hears the audio).
+   * `accuracy` and `diff` keep their meaning either way.
+   */
+  pronunciation?: {
+    overall: number; // 0–100
+    source?: "azure" | "scribe";
+    tip?: string;
+    fluency?: number;
+    completeness?: number;
+    /** `i`: index into `diff`. `phonemes[].p` is empty where Azure scores sounds without naming them. */
+    words: { word: string; score: number; i: number; phonemes?: { p: string; score: number }[] }[];
+  };
 };
 
 /** POST /ext/word: one tapped word, explained in the line it came from. */
