@@ -4,6 +4,7 @@ import { Link } from "wasp/client/router";
 import "./Main.css";
 import "./study.css";
 import { SketchDefs } from "./SketchDefs";
+import { TappableLine } from "./WordTaps";
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
@@ -45,7 +46,9 @@ export function DeckPage() {
           <div>
             <div className="kicker">Scriba</div>
             <h1>Your deck</h1>
-            <p className="sub">Every line you paused on, ranked by how often you stopped there.</p>
+            <p className="sub">
+              Every line you paused on, ranked by how often you stopped there. Open a card to practise it, or tap a word.
+            </p>
           </div>
         </div>
         <Link to="/practice" className="btn primary">
@@ -67,15 +70,13 @@ export function DeckPage() {
       <div className="cards">
         {cards?.map((c) => (
           <div key={keyOf(c)} className="card">
-            <a
-              className="card-link"
-              href={`https://www.youtube.com/watch?v=${c.videoId}&t=${Math.max(0, Math.floor(c.start) - 1)}s`}
-              target="_blank"
-              rel="noreferrer"
-            >
-              <div className="line-es">{c.text}</div>
-              {c.romanization && <div className="line-rom">{c.romanization}</div>}
-              {c.translation && <div className="line-en">{c.translation}</div>}
+            {/* The whole slip opens this card in practice; the words, the video name and the × sit above it. */}
+            <Link className="card-open" to="/practice" search={{ card: keyOf(c) }} aria-label={`Practise “${c.text}”`} />
+            <div className="card-body">
+              <TappableLine key={keyOf(c)} card={c} className="line-es">
+                {c.romanization && <div className="line-rom">{c.romanization}</div>}
+                {c.translation && <div className="line-en">{c.translation}</div>}
+              </TappableLine>
               {c.notes.length > 0 && (
                 <ul className="notes">
                   {c.notes.map((n, i) => (
@@ -88,10 +89,19 @@ export function DeckPage() {
                 <span className={c.bestAccuracy === null ? "chip muted" : "chip good"}>
                   {c.bestAccuracy === null ? "not practised" : `best ${Math.round(c.bestAccuracy * 100)}%`}
                 </span>
-                <span className="from">{c.videoTitle}</span>
-                <span className="go">watch at {fmt(c.start)} ↗</span>
+                {/* The only way to the video: its name, at the moment of the line. */}
+                <a
+                  className="from"
+                  href={`https://www.youtube.com/watch?v=${c.videoId}&t=${Math.max(0, Math.floor(c.start) - 1)}s`}
+                  target="_blank"
+                  rel="noreferrer"
+                  title="Watch this moment on YouTube"
+                >
+                  <span className="from-title">{c.videoTitle}</span>
+                  <span className="from-at">at {fmt(c.start)} ↗</span>
+                </a>
               </div>
-            </a>
+            </div>
             <button
               type="button"
               className="btn card-x"

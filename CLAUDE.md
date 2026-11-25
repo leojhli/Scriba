@@ -144,7 +144,9 @@ On pause, a **right-hand sidebar drawn as an unrolled paper scroll** slides in o
 - **Toolbar button** opens the deck (`chrome.action.onClicked` in `background.ts`).
 - **Pencil look:** outlines are drawn on pseudo-elements through two SVG noise-displacement filters (`#sk1`, `#sk2`, defined inside the shadow root in the extension and by `SketchDefs.tsx` on the web pages), so lines wobble like pencil with a faint second stroke; text is never filtered. Orange buttons use a hatched marker fill.
 - **Web pages match:** `/`, `/deck` and `/practice` (`study.css`) use the same paper desk, Scriba header, sketched slips and hatched buttons; `/practice` puts the card on the same scroll (rolls, ribbon) with a score ring and progress dots. The tab title and favicon are Scriba (`main.wasp`).
-- **Delete a card (added 2026-11-23):** each deck card has a sketched × in its top-right corner; on hover or keyboard focus, "Delete" unrolls to its left. Clicking it hides the card at once and calls the `deleteCard` action, which deletes that line's Moments and ShadowAttempts for the demo user (a later pause on the line starts a fresh card). No confirm step. If the call fails, the card comes back with an error line. The card is now a `div.card` holding the YouTube link (`a.card-link`) and the button side by side, because a button can't sit inside a link.
+- **Delete a card (added 2026-11-23):** each deck card has a sketched × in its top-right corner; on hover or keyboard focus, "Delete" unrolls to its left. Clicking it hides the card at once and calls the `deleteCard` action, which deletes that line's Moments and ShadowAttempts for the demo user (a later pause on the line starts a fresh card). No confirm step. If the call fails, the card comes back with an error line.
+- **Deck cards open practice (added 2026-11-24):** clicking a deck card opens that card first in `/practice` (`/practice?card=<videoId>:<segmentId>`; the rest of the top 5 follow). The only link to YouTube is the video name at the bottom of the card ("<title> at m:ss ↗", new tab, at the line's moment). The card is a `div.card` with an empty `a.card-open` stretched over it; the words, the word card, the video name and the × sit above that link (`z-index: 1`), so clicking them never opens practice.
+- **Tap a word on /deck and /practice (added 2026-11-24):** the line's words are tappable there too, with the same word card as the scroll (meaning, dictionary form, romanization, note, speaker; tap the word again or × to close). `TappableLine` in `src/client/WordTaps.tsx` splits the line with `src/shared/words.ts` (a copy of the extension's `words.ts`; keep them the same) and asks the **`getWordGloss`** query, which shares `/ext/word`'s lookup and `words.json` cache (`glossWord()` in `src/server/word.ts`). The speaker plays the server's TTS of the word, else cuts the word out of the dialogue track at .75× (`DeckCard.words` carries Scribe's word timings). One sound plays at a time on these pages (`src/client/sound.ts`), and holding to shadow stops it.
 - Superseded on the way: a full-window page, then a full-video frosted overlay. Screens of each are in git history (`a57ce75`).
 
 ## Scope decision: pause is the only signal
@@ -288,7 +290,7 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 | `/ext/word` | `{ videoId, segmentId, line, word, index }` | `WordGloss` for a tapped word (cached per video). 502 if Claude is unavailable. |
 | `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
 
-Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, and `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`.
+Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`, and `getWordGloss` (query) `{ videoId, segmentId, line, word, index }` → `WordGloss` (tap a word; same lookup and cache as `/ext/word`).
 
 **Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com.
 
@@ -410,7 +412,7 @@ Watch it fail, then implement: `normalize` lowercases, applies NFD and strips th
 ### Task 7: Study program pages (D, with A)
 
 - `getDeck` (Wasp query): group the demo user's Moments by `(videoId, segmentId)` and sum the weights. Join the segment text, the video title and the best ShadowAttempt accuracy. Sort by total weight, highest first.
-- `/deck`: one card per line, showing the line, the video title, chips for why it was flagged ("rewound 2×, paused"), and the best score or "not practised". Clicking a card opens `youtube.com/watch?v={id}&t={start-1}`.
+- `/deck`: one card per line, showing the line, the video title, chips for why it was flagged ("rewound 2×, paused"), and the best score or "not practised". Clicking a card opens it in `/practice` (the video name links to `youtube.com/watch?v={id}&t={start-1}`; see "Deck cards open practice").
 - `/practice`: steps through the top 5 cards. For each, play the dialogue clip, show the translation, record a shadowing attempt in the page (same score logic through a Wasp action) and move to the next card.
 - **Verify:** after the demo flow, `/deck` lists the lines you paused on, most-paused first, and practising one updates its score.
 
