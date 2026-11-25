@@ -108,6 +108,24 @@ function sketchDefs(): SVGSVGElement {
   return svg;
 }
 
+/** Pronunciation score colour: green, amber, red (Azure calls a word below 60 mispronounced). */
+const prColor = (score: number) => (score >= 80 ? "#3fb55e" : score >= 60 ? "#d99a00" : "#d6533a");
+
+/** "Pronunciation 80 · fluency 90 · complete 75" under the word diff. */
+function pronLine(p: NonNullable<ShadowResult["pronunciation"]>): HTMLDivElement {
+  const b = h("b", "", String(p.overall));
+  const el = h(
+    "div",
+    "pron",
+    "Pronunciation ",
+    b,
+    p.fluency !== undefined && ` · fluency ${p.fluency}`,
+    p.completeness !== undefined && ` · complete ${p.completeness}`,
+  );
+  el.style.setProperty("--prc", prColor(p.overall));
+  return el;
+}
+
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 const MASCOT = () => chrome.runtime.getURL("assets/scriba-inu.png");
 
@@ -294,6 +312,18 @@ a.btn { text-decoration: none; }
 .w.missed { background: rgba(255,170,155,.5); color: #a3321f; text-decoration: line-through; }
 .w.wrong { background: rgba(255,214,102,.5); color: #7a5a00; }
 .w.extra { color: var(--muted); font-style: italic; }
+/* Pronunciation (Azure): a pencil underline by how well each word was said, tap for its sounds */
+.w[data-pr] { position: relative; border-bottom: 2.5px solid var(--prc); border-radius: 6px 6px 2px 2px; }
+.w[data-pr] sup { font-size: .62em; font-weight: 700; color: var(--prc); margin-left: .15em; }
+.w.tapme { cursor: pointer; }
+.w.tapme:hover, .w.tapme:focus-visible { outline: 1.5px dashed var(--prc); outline-offset: 1px; }
+.pron { font-family: var(--hand); font-size: .82em; color: var(--muted); }
+.pron b { color: var(--prc, var(--ink)); }
+.sounds { display: flex; flex-wrap: wrap; gap: .3em; margin-top: .2em; }
+.sound { display: inline-flex; gap: .3em; align-items: baseline; padding: .05em .45em; border-radius: 8px; font-size: .86em;
+  background: color-mix(in srgb, var(--prc) 22%, transparent); }
+.sound b { font-family: var(--round); font-weight: 600; }
+.sound i { font-style: normal; font-size: .85em; color: var(--muted); }
 .pace, .status { color: var(--muted); font-size: .82em; }
 .compare:empty { display: none; }
 .compare { display: flex; flex-wrap: wrap; align-items: center; gap: .4em; padding-top: .3em; }
@@ -1066,19 +1096,68 @@ export class Overlay {
     ring.style.setProperty("--p", String(pct));
     ring.style.setProperty("--c", color);
     const pace = r.paceRatio > 1.25 ? "a little slow" : r.paceRatio < 0.8 ? "a little fast" : "great pace";
+    const p = r.pronunciation;
+    const byDiff = new Map((p?.words ?? []).map((w) => [w.i, w]));
     el.replaceChildren(
       ring,
       h(
         "div",
         "",
-        h("div", "words", ...r.diff.map((d) => {
+        h("div", "words", ...r.diff.map((d, k) => {
           const w = h("span", `w ${d.status}`, d.word);
           w.title = d.status;
+          const pr = byDiff.get(k);
+          if (pr) {
+            // How well it was said (Azure): underline colour + score; tap for its sounds.
+            w.dataset.pr = String(pr.score);
+            w.style.setProperty("--prc", prColor(pr.score));
+            w.append(h("sup", "", String(pr.score)));
+            w.title = `${d.status} · pronunciation ${pr.score}`;
+            if (pr.phonemes?.length) {
+              w.classList.add("tapme");
+              w.tabIndex = 0;
+              w.setAttribute("role", "button");
+              w.title += " · tap for its sounds";
+              const show = () => this.sounds(pr.word, pr.score, pr.phonemes!);
+              w.addEventListener("click", show);
+              w.addEventListener("keydown", (ev) => ev.key === "Enter" && show());
+            }
+          }
           return w;
         })),
+        p && pronLine(p),
         h("div", "pace", `Pace ${r.paceRatio.toFixed(2)}× · ${pace}`),
       ),
     );
+  }
+
+  /**
+   * A tapped word's sounds (Azure phoneme scores), on the same card as tap-a-word. Azure names the
+   * sounds only for English (US) and Mandarin; elsewhere they're numbered.
+   */
+  private sounds(word: string, score: number, phonemes: { p: string; score: number }[]): void {
+    const slot = this.glossSlot;
+    if (!slot) return;
+    this.lineToks[this.glossSel]?.classList.remove("sel");
+    this.glossSel = -1;
+    const weak = phonemes.filter((ph) => ph.score < 60);
+    const named = phonemes.some((ph) => ph.p);
+    const chip = (ph: { p: string; score: number }, n: number) => {
+      const c = h("span", "sound", h("b", "", ph.p || `sound ${n + 1}`), h("i", "", String(Math.round(ph.score))));
+      c.style.setProperty("--prc", prColor(ph.score));
+      return c;
+    };
+    const tip = !weak.length
+      ? "Every sound was clear."
+      : named
+        ? `Work on ${weak.map((ph) => `“${ph.p}”`).join(", ")}.`
+        : `${weak.length} of ${phonemes.length} sounds were unclear: try “Hear it clearly” at .5× and copy it.`;
+    const head = h("div", "", h("span", "gw", word), h("span", "gl", `pronunciation ${score}`));
+    const x = h("button", "x", "×");
+    x.title = "Close";
+    x.setAttribute("aria-label", "Close");
+    x.addEventListener("click", () => slot.replaceChildren());
+    slot.replaceChildren(h("div", "gloss", h("div", "gbody", head, h("div", "sounds", ...phonemes.map(chip)), h("div", "gn", tip)), x));
   }
 
   hideBubble(): void {
