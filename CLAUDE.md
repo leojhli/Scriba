@@ -90,6 +90,15 @@ Shadowing used to check only *which words* you said (Scribe + word LCS). Now, af
 - **Verified on real audio** (the dialogue track of `iDulhoQ2pro`, English, with synthetic takes made from the actor's own line): same melody faster/higher or slower/lower 77–100, a flat reading 12–18, played backwards 10–40, a different line 22–43. ~60–250 ms per take once the track is decoded (decode ~1–2.5 s, once per video). The demo-cache Spanish clip is mostly whispered, so few frames are voiced there.
 - **Not verified:** a real microphone take (needs a human), and Mandarin tones.
 
+## Clarity + coaching tip, no Azure needed (built 2026-11-24, branch `feat/pronunciation`)
+
+The default pronunciation feedback, from the keys we already have (ElevenLabs + Anthropic). Azure (next section) replaces the clarity scores when it's configured; the tip works with both.
+- **Clarity (Scribe):** Scribe returns a `logprob` per word; `transcribeWords()` now keeps it, and `clarityFromScribe()` (`src/shared/clarity.ts`, unit-tested) turns it into 0–100 per word of the line (`exp(logprob)`), lined up with the word diff, with missed/wrong words counting 0 in the overall. It measures whether a listener would catch the word, not per-sound accuracy. Below 70 counts as unclear.
+- **Tip (Claude, `src/server/coach.ts`):** when something was missed, wrong, added or unclear (`needsTip()`; never for silence), Claude gets the line, what was heard and each word's status/clarity (`tipInput()`) and writes one or two sentences on the most likely sound to fix. Claude can't hear audio: it reasons from how the words came out ("«perro» came out as «pero» … the rolled rr"). Same model/settings as explain, 6 s timeout; no tip on timeout or error. The ShadowAttempt is saved before the tip is requested.
+- **UI:** each word's score as a coloured underline, "Clarity N" (or "Pronunciation N · fluency · complete" with Azure), and the tip in a "Tip" box.
+- **Verified live** (learner-like takes made with ElevenLabs TTS, converted to webm/opus, through the real `/ext/shadow`): clean takes → clarity 100, no tip, ~0.3 s; "perro" said as "pero" → accuracy 83 and the rolled-rr tip; wrong words → a tip naming them; with a tip, ~2.7–3.7 s per take. Clarity stays ~100 for anything intelligible (a TTS "Spanish accent", a mild lowpass) and drops only when a word really blurs (heavy noise: "they" 62; rushed + muffled: "been" 56), and the tip then targets that word.
+- **Not verified:** a real microphone take (needs a human).
+
 ## Pronunciation scores with Azure (built 2026-11-24, branch `feat/pronunciation`, optional)
 
 Phase 2 of the pronunciation handoff: per-word and per-sound scores from **Azure Speech Pronunciation Assessment**, used only when `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` (or `AZURE_SPEECH_ENDPOINT`) are set in `.env.server`. Without them, shadowing behaves exactly as before.
@@ -261,7 +270,8 @@ export type Explanation = { summary: string; audioUrl: string | null;
   lines: { segmentId: number; original: string; romanization?: string; translation: string; notes: string[] }[];
   offline?: boolean; partial?: boolean }
 export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[]; accuracy: number; paceRatio: number;
-  pronunciation?: { overall: number; fluency?: number; completeness?: number;   // Azure, only when configured
+  pronunciation?: { overall: number; source?: "azure" | "scribe"; tip?: string;   // scribe = clarity; tip from Claude
+    fluency?: number; completeness?: number;   // Azure only
     words: { word: string; score: number; i: number; phonemes?: { p: string; score: number }[] }[] } }  // i = index into diff
 ```
 
