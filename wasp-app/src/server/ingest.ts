@@ -9,6 +9,7 @@ import { checkDemoKey } from "./demoKey";
 import { isolate, transcribe } from "./eleven";
 import { videoDir, writeJson } from "./paths";
 import { getVideo } from "./videos";
+import { offScript } from "../shared/script";
 
 const run = promisify(execFile);
 
@@ -125,7 +126,19 @@ export async function ingest(videoId: string): Promise<void> {
   const tAudio = lap();
 
   const isolating = isolate(audio, path.join(dir, "dialogue.mp3"));
-  const { segments, language } = await transcribe(audio); // language auto-detected per video
+  const first = await transcribe(audio); // language auto-detected per video
+  const language = first.language;
+  let segments = first.segments;
+  // Auto-detect can still write a word in another language's script (a Korean video got 国外
+  // for 국외). Then transcribe again with the detected language set; keep the first on failure.
+  if (offScript(segments.map((s) => s.text).join(" "), language)) {
+    console.log(`[ingest] ${videoId} transcript mixes scripts (language=${language}); transcribing again with it set`);
+    try {
+      segments = (await transcribe(audio, language)).segments;
+    } catch (e) {
+      console.warn(`[ingest] ${videoId} second transcription failed; keeping the first`, e);
+    }
+  }
   const tScribe = lap();
 
   const title = stdout.trim().split("\n").pop()?.trim();
