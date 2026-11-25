@@ -34,6 +34,18 @@ export type ShadowResult = {
   diff: { word: string; status: "ok" | "missed" | "wrong" | "extra" }[];
   accuracy: number;
   paceRatio: number;
+  /**
+   * Per-word and per-sound scores from Azure Pronunciation Assessment, when the server has Azure
+   * keys and the language is supported (otherwise absent: scoring is Scribe + the word diff).
+   * `accuracy` and `diff` keep their meaning either way.
+   */
+  pronunciation?: {
+    overall: number; // 0–100
+    fluency?: number;
+    completeness?: number;
+    /** `i`: index into `diff`. `phonemes[].p` is empty where Azure scores sounds without naming them. */
+    words: { word: string; score: number; i: number; phonemes?: { p: string; score: number }[] }[];
+  };
 };
 
 /** POST /ext/word: one tapped word, explained in the line it came from. */
