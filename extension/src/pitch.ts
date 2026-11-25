@@ -14,17 +14,31 @@ export const PITCH = {
   rate: 16000,
   frameSec: 0.04,
   hopSec: 0.01,
-  minHz: 70,
+  /** 60, not 70: deep voices dip under 70 Hz at the end of a phrase (one test voice sat at ~85 Hz). */
+  minHz: 60,
   maxHz: 500,
-  /** YIN: the first lag whose normalised difference dips under this is the period. */
-  threshold: 0.15,
+  /**
+   * YIN: the first lag whose normalised difference dips under this is the period. The textbook
+   * 0.1–0.15 suits clean recordings; on the voice-isolated, mp3-compressed dialogue track it found
+   * pitch in only ~30–40 % of a normal line's frames. 0.35 finds ~35–55 % with ≤7 % octave-ish
+   * jumps between frames (0.45 jumped up to 11 %). Measured on iDulhoQ2pro, 2026-11-24.
+   */
+  threshold: 0.35,
   /** Frames quieter than this share of the loud frames' level count as silence. */
   quietShare: 0.12,
   quietFloor: 0.003,
 };
 
-/** Mean semitone error that scores 0 (6 semitones ≈ a different melody altogether). Tune here. */
-export const ZERO_SCORE_ERROR_ST = 6;
+/**
+ * Scoring scale (tune here). The error is measured against how much the actor's own melody moves:
+ * reading the line on one flat note scores ~0, matching it scores 100, so a calm speaker and an
+ * animated one are judged on the same scale. (A fixed "6 semitones off = 0" let a flat reading of
+ * a calm line score 85 on real audio.)
+ * - noiseSt: error that's just measurement noise (a resampled copy of the actor scored 0.25 st off).
+ * - minRangeSt: the scale never goes below this, so an almost monotone actor doesn't make every
+ *   small wobble count as a big miss.
+ */
+export const SCORE = { noiseSt: 0.25, minRangeSt: 1 };
 /** Fewer voiced frames than this on either side (150 ms) → no score: it would mislead. */
 export const MIN_VOICED_FRAMES = 15;
 
@@ -38,7 +52,7 @@ export type Intonation = {
 };
 
 /** Box-averages `x` from `from` Hz down to `to` Hz (no-op if it's already at or below). */
-function downsample(x: Float32Array, from: number, to: number): Float32Array {
+export function downsample(x: Float32Array, from: number, to: number): Float32Array {
   if (from <= to) return x;
   const ratio = from / to;
   const out = new Float32Array(Math.floor(x.length / ratio));
@@ -243,9 +257,24 @@ export function intonationScore(actor: Contour, learner: Contour): Intonation | 
   const band = Math.max(2, Math.ceil(0.2 * Math.max(a.length, b.length)));
   const { cost, path } = dtwAlign(a, b, band);
   if (!Number.isFinite(cost)) return null;
-  const err = path.reduce((s, [p, q]) => s + Math.abs(a[p] - b[q]), 0) / path.length;
+  // Error once per actor frame (against the average of the learner frames matched to it), not
+  // per path step: averaging along the path let a flat reading "linger" where the actor happened
+  // to sit near the middle and look better than it is. This is also what the chart draws.
+  const matched = new Float64Array(a.length);
+  const count = new Uint32Array(a.length);
+  for (const [p, q] of path) {
+    matched[p] += b[q];
+    count[p]++;
+  }
+  let err = 0;
+  for (let p = 0; p < a.length; p++) err += Math.abs(a[p] - matched[p] / count[p]);
+  err /= a.length;
+  // What a flat reading would be off by: how far the actor's curve strays from its own middle.
+  const mid = median(a);
+  const flatErr = a.reduce((s, v) => s + Math.abs(v - mid), 0) / a.length;
+  const scale = Math.max(flatErr, SCORE.minRangeSt);
   return {
-    score: 100 * Math.max(0, 1 - err / ZERO_SCORE_ERROR_ST),
+    score: 100 * Math.max(0, 1 - Math.max(0, err - SCORE.noiseSt) / scale),
     meanErrorSemitones: err,
     path: path.map(([p, q]) => [ai[p], li[q]]),
   };

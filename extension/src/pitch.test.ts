@@ -112,6 +112,17 @@ describe("intonationScore", () => {
     expect(r.score).toBeLessThan(55);
   });
 
+  it("scores reading it on one flat note low", () => {
+    const r = intonationScore(rise(40), Array(40).fill(0))!;
+    expect(r.score).toBeLessThan(25);
+  });
+
+  it("doesn't punish small wobbles against an almost monotone actor", () => {
+    const calm = rise(40).map((x) => x / 20); // ±0.2 semitones
+    const r = intonationScore(calm, calm.map((x, i) => x + (i % 2 ? 0.3 : -0.3)))!;
+    expect(r.score).toBeGreaterThan(80);
+  });
+
   it("gives up on too little voiced audio", () => {
     expect(intonationScore(rise(10), rise(40))).toBeNull();
     expect(intonationScore(rise(40), [1, 2, null, null, 3])).toBeNull();
