@@ -111,19 +111,29 @@ function sketchDefs(): SVGSVGElement {
 /** Pronunciation score colour: green, amber, red (Azure calls a word below 60 mispronounced). */
 const prColor = (score: number) => (score >= 80 ? "#3fb55e" : score >= 60 ? "#d99a00" : "#d6533a");
 
-/** "Pronunciation 80 · fluency 90 · complete 75" under the word diff. */
-function pronLine(p: NonNullable<ShadowResult["pronunciation"]>): HTMLDivElement {
-  const b = h("b", "", String(p.overall));
+/**
+ * Under the word diff: "Clarity 82" (how sure Scribe was of your words) or, with Azure,
+ * "Pronunciation 80 · fluency 90 · complete 75". Nothing when no word was scored.
+ */
+function pronLine(p: NonNullable<ShadowResult["pronunciation"]>): HTMLDivElement | null {
+  if (!p.words.length) return null;
+  const azure = p.source === "azure";
   const el = h(
     "div",
     "pron",
-    "Pronunciation ",
-    b,
+    azure ? "Pronunciation " : "Clarity ",
+    h("b", "", String(p.overall)),
     p.fluency !== undefined && ` · fluency ${p.fluency}`,
     p.completeness !== undefined && ` · complete ${p.completeness}`,
   );
+  el.title = azure ? "Azure pronunciation assessment" : "How clearly each word came through: how sure the transcription was of it";
   el.style.setProperty("--prc", prColor(p.overall));
   return el;
+}
+
+/** Claude's coaching tip, with «quotes» shown as curly quotes like Scriba's note. */
+function tipLine(tip: string): HTMLDivElement {
+  return h("div", "coach", h("span", "lbl", "Tip"), tip.replace(/«\s*/g, "“").replace(/\s*»/g, "”"));
 }
 
 const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -319,6 +329,9 @@ a.btn { text-decoration: none; }
 .w.tapme:hover, .w.tapme:focus-visible { outline: 1.5px dashed var(--prc); outline-offset: 1px; }
 .pron { font-family: var(--hand); font-size: .82em; color: var(--muted); }
 .pron b { color: var(--prc, var(--ink)); }
+.coach { font-family: var(--hand); font-size: .86em; line-height: 1.4; color: #4a3f37; margin-top: .25em; padding: .3em .55em;
+  background: rgba(255,163,60,.14); border-left: 2.5px solid var(--shiba-deep); border-radius: 3px 8px 8px 3px; }
+.coach .lbl { font-weight: 700; color: var(--shiba-deep); margin-right: .4em; }
 .sounds { display: flex; flex-wrap: wrap; gap: .3em; margin-top: .2em; }
 .sound { display: inline-flex; gap: .3em; align-items: baseline; padding: .05em .45em; border-radius: 8px; font-size: .86em;
   background: color-mix(in srgb, var(--prc) 22%, transparent); }
@@ -1112,7 +1125,7 @@ export class Overlay {
             w.dataset.pr = String(pr.score);
             w.style.setProperty("--prc", prColor(pr.score));
             w.append(h("sup", "", String(pr.score)));
-            w.title = `${d.status} · pronunciation ${pr.score}`;
+            w.title = `${d.status} · ${p?.source === "azure" ? "pronunciation" : "clarity"} ${pr.score}`;
             if (pr.phonemes?.length) {
               w.classList.add("tapme");
               w.tabIndex = 0;
@@ -1126,6 +1139,7 @@ export class Overlay {
           return w;
         })),
         p && pronLine(p),
+        p?.tip && tipLine(p.tip),
         h("div", "pace", `Pace ${r.paceRatio.toFixed(2)}× · ${pace}`),
       ),
     );
