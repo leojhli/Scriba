@@ -184,6 +184,9 @@ function glyphsFor(lines: Line[]): string[] {
 const UNROLL_DELAY_MS = 120;
 const UNROLL_MS = 650;
 const UNROLL_EASE = "cubic-bezier(.3,.7,.2,1)";
+// The shade over the video follows the roll down with a soft edge, then reaches the bottom.
+const SHADE_FEATHER = 48;
+const SHADE_SETTLE_MS = 200;
 
 const CSS = `
 :host { all: initial; }
@@ -433,9 +436,11 @@ export class Overlay {
   private wrap!: HTMLDivElement;
   private stage!: HTMLDivElement;
   private paper!: HTMLDivElement;
+  private scrollEl!: HTMLDivElement;
+  private shade!: HTMLDivElement;
   private rollTop!: HTMLDivElement;
   private rollBottom!: HTMLDivElement;
-  /** The unroll running on the paper and the bottom roll, if any. */
+  /** The unroll running on the paper, the bottom roll and the shade, if any. */
   private unrolling: Animation[] = [];
   private canvas: HTMLCanvasElement | null = null;
   private chips!: HTMLDivElement;
@@ -511,6 +516,7 @@ export class Overlay {
     this.rollTop = h("div", "roll top");
     this.rollBottom = h("div", "roll bottom");
     const scroll = h("div", "scroll", this.rollTop, h("div", "ribbon"), this.paper, this.rollBottom);
+    this.scrollEl = scroll;
     // Keep clicks and keys on the scroll from reaching YouTube's player (which would toggle play/pause).
     // Everything outside it lets clicks through: clicking the video resumes it, as usual.
     for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu", "wheel"])
@@ -523,7 +529,8 @@ export class Overlay {
         this.handlers.onResume();
       }
     });
-    this.stage = h("div", "stage", h("div", "shade"), scroll);
+    this.shade = h("div", "shade");
+    this.stage = h("div", "stage", this.shade, scroll);
     this.chips = h("div", "chips");
     this.wrap = h("div", "wrap", this.stage, this.chips);
     root.append(sketchDefs(), this.wrap);
@@ -671,8 +678,11 @@ export class Overlay {
   /**
    * The scroll arrives rolled up, then unrolls: the bottom roll drops to its place and the paper
    * (with everything on it) is revealed behind it. Both move by the same distance on the same
-   * curve, so the paper's edge stays tucked under the roll. Measured from the finished layout, and
-   * the animations only add an offset to it, so the scroll always ends exactly where CSS puts it.
+   * curve, so the paper's edge stays tucked under the roll. The shade over the video comes down
+   * with them: a mask whose soft edge ends at the roll's bottom edge, so nothing darkens below the
+   * roll before it gets there; once the roll lands, it settles to the bottom of the video.
+   * Measured from the finished layout, and the animations only add an offset to it (or a mask
+   * that ends fully open), so everything ends exactly where the CSS puts it.
    */
   private unroll(): void {
     for (const a of this.unrolling) a.cancel();
@@ -681,10 +691,22 @@ export class Overlay {
     const d = this.rollBottom.offsetTop - (this.rollTop.offsetTop + this.rollTop.offsetHeight);
     if (d <= 0) return; // not laid out (e.g. hidden during an ad): just appear
     const timing: KeyframeAnimationOptions = { duration: UNROLL_MS, delay: UNROLL_DELAY_MS, easing: UNROLL_EASE, fill: "backwards" };
+    // The shade covers the player; this is where the roll's bottom edge ends up, in its coordinates.
+    const landed = this.scrollEl.offsetTop + this.rollBottom.offsetTop + this.rollBottom.offsetHeight;
+    const mask = { maskImage: `linear-gradient(to bottom, #000 calc(100% - ${SHADE_FEATHER}px), transparent)`, maskRepeat: "no-repeat" };
     this.unrolling = [
       this.paper.animate([{ clipPath: `inset(0 0 ${d}px 0)` }, { clipPath: "inset(0 0 0 0)" }], timing),
       // `translate` adds to the roll's own `transform` (its slight tilt) instead of replacing it.
       this.rollBottom.animate([{ translate: `0 ${-d}px` }, { translate: "0 0" }], timing),
+      // Same delay and the same curve over the same time as the roll, then a short settle.
+      this.shade.animate(
+        [
+          { ...mask, maskSize: `100% ${landed - d}px`, easing: UNROLL_EASE },
+          { ...mask, maskSize: `100% ${landed}px`, offset: UNROLL_MS / (UNROLL_MS + SHADE_SETTLE_MS), easing: "ease-out" },
+          { ...mask, maskSize: `100% ${this.stage.clientHeight + SHADE_FEATHER}px` },
+        ],
+        { duration: UNROLL_MS + SHADE_SETTLE_MS, delay: UNROLL_DELAY_MS, fill: "backwards" },
+      ),
     ];
   }
 
