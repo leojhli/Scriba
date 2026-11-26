@@ -180,6 +180,11 @@ function glyphsFor(lines: Line[]): string[] {
   return [...out].slice(0, 12);
 }
 
+// The unroll on pause: starts while the rolled-up scroll slides in, then eases to a stop.
+const UNROLL_DELAY_MS = 120;
+const UNROLL_MS = 650;
+const UNROLL_EASE = "cubic-bezier(.3,.7,.2,1)";
+
 const CSS = `
 :host { all: initial; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -428,6 +433,10 @@ export class Overlay {
   private wrap!: HTMLDivElement;
   private stage!: HTMLDivElement;
   private paper!: HTMLDivElement;
+  private rollTop!: HTMLDivElement;
+  private rollBottom!: HTMLDivElement;
+  /** The unroll running on the paper and the bottom roll, if any. */
+  private unrolling: Animation[] = [];
   private canvas: HTMLCanvasElement | null = null;
   private chips!: HTMLDivElement;
   private offlineChip: HTMLDivElement | null = null;
@@ -499,7 +508,9 @@ export class Overlay {
 
     this.canvas = h("canvas", "fx");
     this.paper = h("div", "paper", this.canvas);
-    const scroll = h("div", "scroll", h("div", "roll top"), h("div", "ribbon"), this.paper, h("div", "roll bottom"));
+    this.rollTop = h("div", "roll top");
+    this.rollBottom = h("div", "roll bottom");
+    const scroll = h("div", "scroll", this.rollTop, h("div", "ribbon"), this.paper, this.rollBottom);
     // Keep clicks and keys on the scroll from reaching YouTube's player (which would toggle play/pause).
     // Everything outside it lets clicks through: clicking the video resumes it, as usual.
     for (const ev of ["click", "dblclick", "mousedown", "mouseup", "pointerdown", "pointerup", "contextmenu", "wheel"])
@@ -593,6 +604,7 @@ export class Overlay {
   /** Writes the header, Scriba's note and the footer onto the scroll, then unrolls it. */
   private build(t: number | null): boolean {
     if (!this.ensure()) return false;
+    const wasOpen = this.open;
     clearTimeout(this.closeTimer);
     clearInterval(this.recTimer);
     for (const el of this.content) el.remove();
@@ -649,10 +661,31 @@ export class Overlay {
     this.paper.append(head, body, foot);
     this.open = true;
     this.wrap.classList.add("open");
+    if (!wasOpen) this.unroll(); // a new pause; redrawing an open scroll doesn't unroll it again
     requestAnimationFrame(() => this.stage.classList.add("on"));
     this.loadFx();
     if (!this.hidden) this.fx?.start();
     return true;
+  }
+
+  /**
+   * The scroll arrives rolled up, then unrolls: the bottom roll drops to its place and the paper
+   * (with everything on it) is revealed behind it. Both move by the same distance on the same
+   * curve, so the paper's edge stays tucked under the roll. Measured from the finished layout, and
+   * the animations only add an offset to it, so the scroll always ends exactly where CSS puts it.
+   */
+  private unroll(): void {
+    for (const a of this.unrolling) a.cancel();
+    this.unrolling = [];
+    if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const d = this.rollBottom.offsetTop - (this.rollTop.offsetTop + this.rollTop.offsetHeight);
+    if (d <= 0) return; // not laid out (e.g. hidden during an ad): just appear
+    const timing: KeyframeAnimationOptions = { duration: UNROLL_MS, delay: UNROLL_DELAY_MS, easing: UNROLL_EASE, fill: "backwards" };
+    this.unrolling = [
+      this.paper.animate([{ clipPath: `inset(0 0 ${d}px 0)` }, { clipPath: "inset(0 0 0 0)" }], timing),
+      // `translate` adds to the roll's own `transform` (its slight tilt) instead of replacing it.
+      this.rollBottom.animate([{ translate: `0 ${-d}px` }, { translate: "0 0" }], timing),
+    ];
   }
 
   /** Shown immediately on pause, so the scroll is never blank. */
@@ -1188,6 +1221,8 @@ export class Overlay {
     this.wrap.classList.remove("open");
     this.closeTimer = setTimeout(() => {
       if (this.open) return;
+      for (const a of this.unrolling) a.cancel();
+      this.unrolling = [];
       this.fx?.stop();
       for (const el of this.content) el.remove();
       this.content = [];
