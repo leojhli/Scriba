@@ -218,7 +218,10 @@ const CSS = `
 .roll.bottom { transform: rotate(-.5deg); }
 .ribbon { position: absolute; top: 12px; right: 34px; width: 13px; height: 36px; background: var(--ribbon); border: 1.75px solid var(--ink);
   clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%); z-index: 1; }
-.paper { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; overflow: hidden; container: paper / inline-size;
+/* .win is the paper's window: while the scroll unrolls it clips (see unroll()) and its bottom edge
+   rides down with the roll. At rest it doesn't clip, so the frosted sheet draws exactly as before. */
+.win { position: relative; flex: 1; min-height: 0; margin: -4px 2px; display: flex; flex-direction: column; }
+.paper { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; container: paper / inline-size;
   background: linear-gradient(90deg, rgba(240,226,204,.55), rgba(255,251,243,.0) 9%, rgba(255,251,243,0) 91%, rgba(240,226,204,.55)), rgba(255,250,240,.8);
   backdrop-filter: blur(12px) saturate(1.1); -webkit-backdrop-filter: blur(12px) saturate(1.1); }
 .paper::before, .paper::after { content: ""; position: absolute; z-index: 2; pointer-events: none; }
@@ -436,11 +439,12 @@ export class Overlay {
   private wrap!: HTMLDivElement;
   private stage!: HTMLDivElement;
   private paper!: HTMLDivElement;
+  private win!: HTMLDivElement;
   private scrollEl!: HTMLDivElement;
   private shade!: HTMLDivElement;
   private rollTop!: HTMLDivElement;
   private rollBottom!: HTMLDivElement;
-  /** The unroll running on the paper, the bottom roll and the shade, if any. */
+  /** The unroll running on the paper's window, the paper, the bottom roll and the shade, if any. */
   private unrolling: Animation[] = [];
   private canvas: HTMLCanvasElement | null = null;
   private chips!: HTMLDivElement;
@@ -515,7 +519,8 @@ export class Overlay {
     this.paper = h("div", "paper", this.canvas);
     this.rollTop = h("div", "roll top");
     this.rollBottom = h("div", "roll bottom");
-    const scroll = h("div", "scroll", this.rollTop, h("div", "ribbon"), this.paper, this.rollBottom);
+    this.win = h("div", "win", this.paper);
+    const scroll = h("div", "scroll", this.rollTop, h("div", "ribbon"), this.win, this.rollBottom);
     this.scrollEl = scroll;
     // Keep clicks and keys on the scroll from reaching YouTube's player (which would toggle play/pause).
     // Everything outside it lets clicks through: clicking the video resumes it, as usual.
@@ -677,8 +682,12 @@ export class Overlay {
 
   /**
    * The scroll arrives rolled up, then unrolls: the bottom roll drops to its place and the paper
-   * (with everything on it) is revealed behind it. Both move by the same distance on the same
-   * curve, so the paper's edge stays tucked under the roll. The shade over the video comes down
+   * (with everything on it) is revealed behind it. The paper sits in a window (.win), which clips
+   * only while this runs: the window starts raised by the unroll distance and comes down with the
+   * roll while the paper moves the opposite way, so the paper stays put and the window's bottom
+   * edge stays tucked under the roll. Only transforms and an overflow clip, no clip-path: revealed with a
+   * clip-path, the frosted sheet (backdrop-filter) showed whole before the roll got there in real
+   * Chrome, though not in headless Chrome. The shade over the video comes down
    * with them: a mask whose soft edge ends at the roll's bottom edge, so nothing darkens below the
    * roll before it gets there; once the roll lands, it settles to the bottom of the video.
    * Measured from the finished layout, and the animations only add an offset to it (or a mask
@@ -695,7 +704,9 @@ export class Overlay {
     const landed = this.scrollEl.offsetTop + this.rollBottom.offsetTop + this.rollBottom.offsetHeight;
     const mask = { maskImage: `linear-gradient(to bottom, #000 calc(100% - ${SHADE_FEATHER}px), transparent)`, maskRepeat: "no-repeat" };
     this.unrolling = [
-      this.paper.animate([{ clipPath: `inset(0 0 ${d}px 0)` }, { clipPath: "inset(0 0 0 0)" }], timing),
+      // `overflow` is held for the whole animation (and its delay), and lifted when it ends or is cancelled.
+      this.win.animate([{ translate: `0 ${-d}px`, overflow: "hidden" }, { translate: "0 0", overflow: "hidden" }], timing),
+      this.paper.animate([{ translate: `0 ${d}px` }, { translate: "0 0" }], timing),
       // `translate` adds to the roll's own `transform` (its slight tilt) instead of replacing it.
       this.rollBottom.animate([{ translate: `0 ${-d}px` }, { translate: "0 0" }], timing),
       // Same delay and the same curve over the same time as the roll, then a short settle.
