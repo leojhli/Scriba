@@ -7,7 +7,7 @@ import { Overlay, type Compare, type Line } from "./overlay";
 import { Recorder } from "./recorder";
 import { DIALOGUE_POLL_MS, HEAR_IT_RATE, SESSION_POLL_MS } from "./shared/config";
 import type { Explanation, Segment, ShadowResult, WordGloss } from "./shared/types";
-import { charTimes, splitWords, spreadTimes, tokenAt, tokenSpans, type Span } from "./words";
+import { charTimes, splitWords, spreadTimes, squeezed, tokenAt, tokenSpans, type Span } from "./words";
 import { window as segWindow } from "./shared/window";
 import { isAdShowing, watchAds, watchPlayback } from "./signals";
 import {
@@ -168,7 +168,11 @@ async function explain(video: HTMLVideoElement): Promise<void> {
   }
 
   overlay.explanation(e, {
-    hear: (line) => !!session?.hasDialogue && !!segment(line.segmentId),
+    // From the voice-only track, or read aloud by TTS when the line's timing is squeezed.
+    hear: (line) => {
+      const seg = segment(line.segmentId);
+      return !!seg && (!!session?.hasDialogue || squeezed(seg));
+    },
     shadow: (line) => !!line.original,
     // No lines and not "Still listening…" (the server says that while processing with no captions).
     asleep: !((!session || session.status === "processing") && !captionLines.length),
@@ -309,13 +313,20 @@ function lineSpans(line: Line): (Span | null)[] | null {
  * video muted. `onTick` gets the playhead every frame (for highlighting). Resolves true if it
  * played to the end, false if it was stopped or couldn't play.
  */
-async function playDialogue(start: number, end: number, opts: { onStart?(): void; onTick?(t: number): void } = {}): Promise<boolean> {
+async function playDialogue(start: number, end: number, opts: ClipOpts = {}): Promise<boolean> {
   if (!videoId || isAdShowing()) return false;
   const url = await mediaUrl(`/media/${videoId}/dialogue.mp3`);
   if (!url) {
     overlay.chip("dialogue track unavailable");
     return false;
   }
+  return playClip(url, start, end, opts);
+}
+
+type ClipOpts = { onStart?(): void; onTick?(t: number, duration: number): void };
+
+/** Plays [start, end] of `url` (a blob: URL) like playDialogue; end = Infinity plays to the end. */
+function playClip(url: string, start: number, end: number, opts: ClipOpts = {}): Promise<boolean> {
   stopAudio();
   const v = player();
   if (v) v.muted = true;
@@ -345,12 +356,12 @@ async function playDialogue(start: number, end: number, opts: { onStart?(): void
       { once: true },
     );
     a.addEventListener("error", () => finish(false), { once: true });
-    a.addEventListener("pause", () => finish(a.currentTime >= end - 0.05)); // stopAudio() or the end
+    a.addEventListener("pause", () => finish(a.ended || a.currentTime >= end - 0.05)); // stopAudio() or the end
     let looping = false;
     const loop = () => {
       if (done || clip !== a) return finish(false);
       if (a.currentTime >= end) return finish(true);
-      opts.onTick?.(a.currentTime);
+      opts.onTick?.(a.currentTime, a.duration);
       requestAnimationFrame(loop);
     };
     a.addEventListener("playing", () => {
@@ -366,17 +377,38 @@ async function playLine(line: Line, i: number, onStart?: () => void): Promise<bo
   const seg = segment(line.segmentId);
   const spans = lineSpans(line);
   if (!seg || !spans) return false;
-  const full = await playDialogue(seg.start - 0.1, seg.end + 0.2, {
-    onStart: () => {
-      clipIndex = i;
-      overlay.hearing(i, true);
-      onStart?.();
-    },
-    onTick: (t) => {
-      overlay.highlightLine(tokenAt(spans, t));
-      overlay.intonationAt(i, t); // the playhead on the pitch chart, if there is one
-    },
-  });
+  const begin = () => {
+    clipIndex = i;
+    overlay.hearing(i, true);
+    onStart?.();
+  };
+  let full: boolean;
+  if (squeezed(seg)) {
+    // Its timing is too short to cut from the video (it would play a sliver): read it aloud instead,
+    // each word lit by length across the clip.
+    const url = await lineVoiceUrl(seg.id);
+    if (!url) {
+      overlay.chip("couldn't read that line aloud");
+      return false;
+    }
+    let voiced: (Span | null)[] | null = null;
+    full = await playClip(url, 0, Infinity, {
+      onStart: begin,
+      onTick: (t, duration) => {
+        if (!Number.isFinite(duration) || duration <= 0) return;
+        voiced ??= tokenSpans(splitWords(line.original), spreadTimes(line.original, 0, duration));
+        overlay.highlightLine(tokenAt(voiced, t));
+      },
+    });
+  } else {
+    full = await playDialogue(seg.start - 0.1, seg.end + 0.2, {
+      onStart: begin,
+      onTick: (t) => {
+        overlay.highlightLine(tokenAt(spans, t));
+        overlay.intonationAt(i, t); // the playhead on the pitch chart, if there is one
+      },
+    });
+  }
   if (!clip) {
     // Not replaced by another clip: tidy up (stopAudio already did if it was stopped).
     if (clipIndex === i) clipIndex = -1;
@@ -385,6 +417,30 @@ async function playLine(line: Line, i: number, onStart?: () => void): Promise<bo
     overlay.intonationAt(i, null);
   }
   return full;
+}
+
+const lineVoices = new Map<string, Promise<string | null>>();
+
+/** A squeezed line read aloud by the server's TTS, as a blob: URL (fetched once per line). */
+function lineVoiceUrl(segmentId: number): Promise<string | null> {
+  const id = videoId;
+  if (!id) return Promise.resolve(null);
+  const key = `${id}#${segmentId}`;
+  let p = lineVoices.get(key);
+  if (!p) {
+    p = api<{ audioUrl: string }>("/ext/line-voice", { videoId: id, segmentId }).then((res) =>
+      res.ok ? mediaUrl(res.data.audioUrl) : null,
+    );
+    p.then((url) => url || lineVoices.delete(key)); // retry a failure next time
+    lineVoices.set(key, p);
+  }
+  return p;
+}
+
+/** True if the line has a real moment in the video to cut from (not squeezed, not captions-only). */
+function timed(line: Line): boolean {
+  const seg = segment(line.segmentId);
+  return !!seg && !squeezed(seg);
 }
 
 function onHear(line: Line, i: number): void {
@@ -421,7 +477,7 @@ async function onWord(line: Line, _i: number, tok: number): Promise<void> {
   const word = tokens[tok]?.text;
   if (!videoId || !word) return;
   // The video's own voice can say it when there's a clean dialogue track for this line.
-  const fromVideo = !!(session?.hasDialogue && segment(line.segmentId));
+  const fromVideo = !!session?.hasDialogue && timed(line);
   const me = { line, tok, gloss: null as WordGloss | null };
   glossFor = me;
   overlay.gloss(tok, { word, loading: true }, fromVideo);
@@ -445,7 +501,7 @@ async function onWordPlay(): Promise<void> {
     if (url && glossFor === g) void playExtra(url);
     return;
   }
-  const span = lineSpans(g.line)?.[g.tok];
+  const span = timed(g.line) ? lineSpans(g.line)?.[g.tok] : null;
   if (!span) return;
   await playDialogue(span.start - 0.08, span.end + 0.12, { onStart: () => overlay.highlightLine(g.tok) });
   if (!clip) overlay.highlightLine(-1);
@@ -479,7 +535,7 @@ function onShadowStart(line: Line, i: number): void {
   stopAudio();
   // Intonation: make the AudioContext inside this press (so it isn't suspended), and start
   // decoding the actor's voice track while you speak.
-  if (videoId && session?.hasDialogue && segment(line.segmentId)) {
+  if (videoId && session?.hasDialogue && timed(line)) {
     audioContext();
     void dialogueAudio(videoId);
   }
@@ -507,9 +563,10 @@ async function onShadowStop(line: Line, i: number): Promise<void> {
   if (blob && durationSec > 0.3) {
     if (take) URL.revokeObjectURL(take);
     take = URL.createObjectURL(blob);
-    // Intonation needs the actor's voice-only line with real timing (not captions-only lines).
-    const pitch = !!(session?.hasDialogue && seg && line.segmentId >= 0);
-    overlay.takeReady(i, line, !!(session?.hasDialogue && seg), pitch);
+    // Intonation needs the actor's voice-only line with real timing (not captions-only or squeezed lines).
+    const pitch = !!session?.hasDialogue && timed(line);
+    // "Original" plays the clip, or the TTS reading of a squeezed line.
+    overlay.takeReady(i, line, !!seg && (!!session?.hasDialogue || squeezed(seg)), pitch);
     // In parallel with the word scoring below; whichever finishes first shows first.
     if (pitch && seg) void showIntonation(i, seg, blob);
   }

@@ -91,3 +91,16 @@ export function tokenAt(spans: (Span | null)[], t: number): number {
   }
   return hit;
 }
+
+/** Even fast speech takes longer than this per letter (or per Chinese/Japanese character). */
+const MIN_SEC_PER_LETTER = 0.04;
+
+/**
+ * True when a line's timing is too short for its text, so cutting it from the video would play
+ * only a sliver (Scribe sometimes stamps every word of a line it's unsure of at the same moment:
+ * 名前はなんだ。 in 0.12 s). Such lines are read aloud by TTS instead.
+ */
+export function squeezed(seg: Pick<Segment, "start" | "end" | "text">): boolean {
+  const letters = [...seg.text].filter((c) => LETTER.test(c)).length;
+  return letters >= 2 && seg.end - seg.start < letters * MIN_SEC_PER_LETTER;
+}

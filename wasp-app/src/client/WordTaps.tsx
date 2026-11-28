@@ -2,7 +2,7 @@ import { type KeyboardEvent, type MouseEvent, type ReactNode, useMemo, useRef, u
 import { config } from "wasp/client";
 import { getWordGloss } from "wasp/client/operations";
 import type { WordGloss } from "../shared/types";
-import { charTimes, splitWords, tokenSpans } from "../shared/words";
+import { charTimes, splitWords, squeezed, tokenSpans } from "../shared/words";
 import type { DeckCard } from "../server/deck";
 import { playSound } from "./sound";
 
@@ -59,14 +59,16 @@ export function TappableLine({ card, className, children }: { card: LineCard; cl
 
   // The word spoken on its own if the server made one, else cut out of the voice-only track.
   const gloss = tapped && "gloss" in tapped ? tapped.gloss : null;
-  const canPlay = !!gloss?.audioUrl || card.hasDialogue;
+  // A squeezed line's timing can't place a word (the server speaks those words instead).
+  const timed = card.hasDialogue && !squeezed(card);
+  const canPlay = !!gloss?.audioUrl || timed;
   const play = () => {
     if (!tapped) return;
     if (gloss?.audioUrl) {
       playSound(`${config.apiUrl}${gloss.audioUrl}`);
       return;
     }
-    const span = tokenSpans(tokens, charTimes(card))[tapped.tok];
+    const span = timed ? tokenSpans(tokens, charTimes(card))[tapped.tok] : null;
     if (span) playSound(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`, { from: span.start - 0.08, to: span.end + 0.12, rate: CLIP_RATE });
   };
 

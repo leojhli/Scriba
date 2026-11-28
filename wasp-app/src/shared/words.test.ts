@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { charTimes, splitWords, spreadTimes, tokenAt, tokenSpans } from "./words";
+import { charTimes, splitWords, spreadTimes, squeezed, tokenAt, tokenSpans } from "./words";
 
 const words = (text: string) => splitWords(text).filter((t) => t.word).map((t) => t.text);
 
@@ -59,5 +59,19 @@ describe("tokenAt", () => {
     expect(tokenAt(spans, 0.5)).toBe(0);
     expect(tokenAt(spans, 1.2)).toBe(0);
     expect(tokenAt(spans, 1.6)).toBe(2);
+  });
+});
+
+describe("squeezed", () => {
+  it("flags a line whose timing is far too short for its text (Scribe stamped every word at once)", () => {
+    // 4XCKamWlCEo line 5: six characters in 0.12 s.
+    expect(squeezed({ start: 24.48, end: 24.6, text: "名前はなんだ。" })).toBe(true);
+    expect(squeezed({ start: 10, end: 10.1, text: "¿Quieres ser un perro?" })).toBe(true);
+  });
+  it("leaves normal and fast lines alone", () => {
+    expect(squeezed({ start: 23.18, end: 24.48, text: "その姿はなんだ？" })).toBe(false);
+    expect(squeezed({ start: 21.82, end: 22.3, text: "バカな。" })).toBe(false);
+    expect(squeezed({ start: 99.48, end: 102.52, text: "¿Quieres ser un perro de trineo?" })).toBe(false);
+    expect(squeezed({ start: 5, end: 5.2, text: "Oh." })).toBe(false); // one short word
   });
 });

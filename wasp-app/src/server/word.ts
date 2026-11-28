@@ -5,6 +5,7 @@ import type { ExtWord } from "wasp/server/api";
 import type { GetWordGloss } from "wasp/server/operations";
 import { hasNonLatin } from "../shared/text";
 import type { WordGloss } from "../shared/types";
+import { squeezed } from "../shared/words";
 import { checkDemoKey } from "./demoKey";
 import { speakIn } from "./eleven";
 import { ttsLanguage } from "./explain";
@@ -83,24 +84,34 @@ async function glossWord(input: WordInput): Promise<WordGloss> {
     throw new WordError(400, "videoId, line and word required");
   }
   const key = `${segmentId}|${index}|${word}|${line}`;
-  const cached = readJson<Cache>(cacheFile(videoId), {})[key];
-  if (cached) return cached;
-
   const t0 = Date.now();
   const video = await getVideo(videoId);
   const seg = video?.segments?.find((s) => s.id === segmentId);
   // The video's own audio plays the word when it has a clean dialogue track and Scribe's word
-  // timings; otherwise the word is spoken on its own, in the video's language.
-  const needVoice = !(video?.hasDialogue && seg?.words?.length);
+  // timings that make sense; otherwise the word is spoken on its own, in the video's language.
+  const needVoice = !(video?.hasDialogue && seg?.words?.length && !squeezed(seg));
   const lang = ttsLanguage(undefined, videoLanguage(videoId));
-  const voice = needVoice
-    ? speakIn(word, lang, path.join(videoDir(videoId), `word-${Math.max(segmentId, 0)}-${index}-${Date.now() % 1e6}.mp3`))
-        .then((f) => `/media/${videoId}/${path.basename(f)}`)
-        .catch((e) => {
-          console.error("[word] TTS failed", e);
-          return null;
-        })
-    : Promise.resolve(null);
+  const speakWord = () =>
+    speakIn(word, lang, path.join(videoDir(videoId), `word-${Math.max(segmentId, 0)}-${index}-${Date.now() % 1e6}.mp3`))
+      .then((f) => `/media/${videoId}/${path.basename(f)}`)
+      .catch((e) => {
+        console.error("[word] TTS failed", e);
+        return null;
+      });
+
+  const cached = readJson<Cache>(cacheFile(videoId), {})[key];
+  if (cached) {
+    if (cached.audioUrl || !needVoice) return cached;
+    // Cached before its line was known to be squeezed: add the spoken word.
+    const audioUrl = await speakWord();
+    if (!audioUrl) return cached;
+    const cache = readJson<Cache>(cacheFile(videoId), {});
+    cache[key] = { ...cached, audioUrl };
+    writeJson(cacheFile(videoId), cache);
+    return cache[key];
+  }
+
+  const voice = needVoice ? speakWord() : Promise.resolve(null);
 
   try {
     const msg = await claude().beta.messages.create({

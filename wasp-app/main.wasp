@@ -94,6 +94,15 @@ api extWord {
   auth: false
 }
 
+// { videoId, segmentId } → { audioUrl }: the line read by TTS, for lines whose timing is
+// squeezed (too short to cut from the video)
+api extLineVoice {
+  fn: import { extLineVoice } from "@src/server/lineVoice",
+  httpRoute: (POST, "/ext/line-voice"),
+  entities: [Video],
+  auth: false
+}
+
 // Task 6: { videoId, segmentId, audioBase64, durationSec } → ShadowResult
 api extShadow {
   fn: import { extShadow } from "@src/server/shadow",
@@ -118,6 +127,11 @@ action submitShadow {
 // an action, so a lookup doesn't make the deck refetch.
 query getWordGloss {
   fn: import { getWordGloss } from "@src/server/word"
+}
+
+// The same as /ext/line-voice, for the play buttons on /deck and /practice.
+query getLineVoice {
+  fn: import { getLineVoice } from "@src/server/lineVoice"
 }
 
 // The × on a deck card: deletes that line's pauses and practice attempts.

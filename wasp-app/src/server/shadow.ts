@@ -6,6 +6,7 @@ import { clarityFromScribe, needsTip, tipInput } from "../shared/clarity";
 import { type Assessment, attachToDiff, azureLocale } from "../shared/pronunciation";
 import type { Word } from "../shared/segments";
 import { score } from "../shared/score";
+import { squeezed } from "../shared/words";
 import { assessPronunciation, azureConfigured, toWav16k } from "./azure";
 import { coachTip } from "./coach";
 import type { ShadowResult } from "../shared/types";
@@ -34,7 +35,8 @@ export async function scoreAttempt(input: ShadowInput, userId: number): Promise<
   const video = await getVideo(videoId);
   const seg = video?.segments?.find((s) => s.id === segmentId);
   const expected = seg?.text ?? input.text ?? "";
-  const origDur = seg ? seg.end - seg.start : (input.origDur ?? durationSec);
+  // A squeezed line has no real length to compare your pace with: count it as on pace.
+  const origDur = seg ? (squeezed(seg) ? durationSec : seg.end - seg.start) : (input.origDur ?? durationSec);
   if (!expected) throw new Error("unknown line");
 
   const t0 = Date.now();
