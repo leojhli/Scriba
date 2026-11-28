@@ -99,6 +99,13 @@ The default pronunciation feedback, from the keys we already have (ElevenLabs + 
 - **Verified live** (learner-like takes made with ElevenLabs TTS, converted to webm/opus, through the real `/ext/shadow`): clean takes → clarity 100, no tip, ~0.3 s; "perro" said as "pero" → accuracy 83 and the rolled-rr tip; wrong words → a tip naming them; with a tip, ~2.7–3.7 s per take. Clarity stays ~100 for anything intelligible (a TTS "Spanish accent", a mild lowpass) and drops only when a word really blurs (heavy noise: "they" 62; rushed + muffled: "been" 56), and the tip then targets that word.
 - **Not verified:** a real microphone take (needs a human).
 
+## Squeezed lines (fixed 2026-11-27, branch `fix/squeezed-lines`)
+
+Scribe sometimes stamps every word of a line it's unsure of at one moment (`4XCKamWlCEo` line 5, 名前はなんだ。, sits at 24.48–24.60 s, every character at 24.48, and the voice track is silent there), so every play button cut a 0.1 s clip that said only だ.
+- **`squeezed(seg)`** (`words.ts` in both packages, unit-tested): true when a line has under 0.04 s per letter (or CJK character).
+- **For such lines:** Hear it clearly, the Original/Back to back buttons and `/practice` play the line read by TTS in the video's language (`/ext/line-voice` / `getLineVoice`, `src/server/lineVoice.ts`, cached as `data/{id}/line-{segmentId}-{hash}.mp3`), words lit by length. Tapped words are spoken by TTS (a word cached earlier without a voice gets one). The intonation chart is skipped, and pace counts as on pace.
+- **Verified:** unit tests; `/ext/line-voice` live (1.0 s of TTS, against the old 0.12 s clip; 4 ms cached); `/practice` plays the TTS line and the TTS word, and normal lines still play from the dialogue track. **Not verified:** the extension's buttons in a real browser (built and type-checked only).
+
 ## Pronunciation scores with Azure (built 2026-11-24, branch `feat/pronunciation`, optional)
 
 Phase 2 of the pronunciation handoff: per-word and per-sound scores from **Azure Speech Pronunciation Assessment**, used only when `AZURE_SPEECH_KEY` and `AZURE_SPEECH_REGION` (or `AZURE_SPEECH_ENDPOINT`) are set in `.env.server`. Without them, shadowing behaves exactly as before.
@@ -294,9 +301,10 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 | `/ext/explain` | `{ videoId, t, captionLines: { text, start, end }[] }` | `Explanation`. Also records a pause Moment. May be `partial: true` (voice first, translations still coming). |
 | `/ext/explain-rest` | `{ videoId, t }` | The full `Explanation` for a pause that came back `partial`; 404 if there's none. |
 | `/ext/word` | `{ videoId, segmentId, line, word, index }` | `WordGloss` for a tapped word (cached per video). 502 if Claude is unavailable. |
+| `/ext/line-voice` | `{ videoId, segmentId }` | `{ audioUrl }`: the line read by TTS in the video's language, for squeezed lines (see "Squeezed lines"). 404 for an unknown line. |
 | `/ext/shadow` | `{ videoId, segmentId, audioBase64, durationSec, text?, origDur? }` | `ShadowResult & { heard }` |
 
-Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`, and `getWordGloss` (query) `{ videoId, segmentId, line, word, index }` → `WordGloss` (tap a word; same lookup and cache as `/ext/word`).
+Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`, `getWordGloss` (query) `{ videoId, segmentId, line, word, index }` → `WordGloss` (tap a word; same lookup and cache as `/ext/word`), and `getLineVoice` (query) `{ videoId, segmentId }` → `{ audioUrl }` (same as `/ext/line-voice`).
 
 **Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com.
 

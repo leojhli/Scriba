@@ -1,8 +1,9 @@
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { config } from "wasp/client";
-import { getDeck, submitShadow, useQuery } from "wasp/client/operations";
+import { getDeck, getLineVoice, submitShadow, useQuery } from "wasp/client/operations";
 import { Link } from "wasp/client/router";
 import type { ShadowResult } from "../shared/types";
+import { squeezed } from "../shared/words";
 import "./Main.css";
 import "./study.css";
 import { SketchDefs } from "./SketchDefs";
@@ -53,8 +54,20 @@ export function PracticePage() {
       </main>
     );
 
-  const play = () =>
-    playSound(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`, { from: card.start - 0.1, to: card.end + 0.2, rate: RATE });
+  const play = async () => {
+    if (!squeezed(card)) {
+      playSound(`${config.apiUrl}/media/${card.videoId}/${card.audioFile}`, { from: card.start - 0.1, to: card.end + 0.2, rate: RATE });
+      return;
+    }
+    // Its timing is too short to cut from the video (it'd play a sliver): read it aloud instead.
+    stopSound();
+    try {
+      const { audioUrl } = await getLineVoice({ videoId: card.videoId, segmentId: card.segmentId });
+      playSound(`${config.apiUrl}${audioUrl}`, { rate: RATE });
+    } catch {
+      setErr("Couldn't read that line aloud right now.");
+    }
+  };
 
   const start = async () => {
     stopSound(); // nothing playing into the take
