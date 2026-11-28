@@ -2,7 +2,7 @@ import express from "express";
 import type { MiddlewareConfigFn, ServerSetupFn } from "wasp/server";
 import { DATA_DIR } from "./paths";
 
-/** Serves data/{videoId}/dialogue.mp3, audio.mp3 and explain-{t}.mp3 at /media/... */
+/** Serves data/{videoId}/dialogue.mp3, audio.mp3 and explain-{t}-{id}.mp3 at /media/... */
 export const setup: ServerSetupFn = async ({ app }) => {
   app.use(
     "/media",

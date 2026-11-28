@@ -298,7 +298,7 @@ export type ShadowResult = { diff: { word: string; status: "ok" | "missed" | "wr
 
 Wasp operations for the pages: `getDeck` (query) → `DeckCard[]`, `submitShadow` (action), which uses the same scoring as `/ext/shadow`, `deleteCard` (action) `{ videoId, segmentId }` → `{ deleted }`, and `getWordGloss` (query) `{ videoId, segmentId, line, word, index }` → `WordGloss` (tap a word; same lookup and cache as `/ext/word`).
 
-**Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com.
+**Media** (`/media/{videoId}/dialogue.mp3`, `explain-{t}-{id}.mp3`) is fetched by the background worker and handed to the content script as a `blob:` URL. That avoids mixed-content and CORS issues on youtube.com. The content script keeps each blob by URL for as long as the page is open, so a URL must never get new content: every voice gets a fresh `{id}` (a shared `explain-{t}.mp3` made a second pause at the same second replay the first pause's voice under the new text), and saving an explanation deletes the voice file it replaced.
 
 **Prisma entities** (see `wasp-app/schema.prisma`; `segments` is a JSON string, see the deviations above):
 

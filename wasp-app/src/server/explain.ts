@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import Anthropic from "@anthropic-ai/sdk";
@@ -245,7 +246,9 @@ function explainInTwoPhases(
   const ms = { summary: 0, voice: 0, claude: 0 };
 
   const speak = async (raw: string, claudeLang: string | undefined): Promise<Voice> => {
-    const file = `explain-${key}.mp3`;
+    // A new name for every voice: a second pause at the same second gets a new summary, and the
+    // extension keeps audio by URL, so a shared explain-{t}.mp3 replayed the first pause's voice.
+    const file = `explain-${key}-${randomBytes(4).toString("hex")}.mp3`;
     let audioUrl: string | null = null;
     try {
       await speakMixed(speechParts(raw), ttsLanguage(claudeLang, scribeLang), path.join(videoDir(videoId), file));
@@ -350,8 +353,12 @@ function save(videoId: string, key: string, e: Explanation): void {
     if (l.segmentId >= 0) tr[l.segmentId] = { translation: l.translation, notes: l.notes, romanization: l.romanization };
   writeJson(translationsFile(videoId), tr);
   const cache = readJson<Cache>(cacheFile(videoId), {});
+  const replaced = cache[key]?.audioUrl;
   cache[key] = e;
   writeJson(cacheFile(videoId), cache);
+  // Each voice has its own file, used only by this cache entry: drop the one it replaced.
+  if (replaced && replaced !== e.audioUrl)
+    fs.rmSync(path.join(videoDir(videoId), path.basename(replaced)), { force: true });
 }
 
 export function hasMedia(videoId: string, file: string): boolean {
